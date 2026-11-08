@@ -43,31 +43,28 @@ Done, you now have an API-only app. 🤓
 
 ## Generate Client
 
-### Automatically
-
-- From the project root, run the script:
+From the application root, use the declared backend environment and provisioned
+frozen uv/Bun profiles:
 
 ```bash
 bash ./scripts/generate-client.sh
 ```
 
-- Commit the changes.
+The script exports FastAPI's native OpenAPI document, then invokes `openapi-ts`.
+The intermediate `frontend/openapi.json` is gitignored SDK input, not an authored
+source file. Generation does not run the source formatter against ignored input
+or start a backend service. Commit the generated `src/client` changes with their
+backend contract inputs.
 
-### Manually
-
-- Make sure the backend is running.
-
-- Download the OpenAPI JSON file from `http://localhost:8000/api/v1/openapi.json` and copy it to a new file `openapi.json` at the root of the `frontend` directory.
-
-- To generate the frontend client, run:
+Regenerate whenever backend changes affect the OpenAPI schema. Check frontend
+sources without rewriting them from the application root:
 
 ```bash
-bun run generate-client
+bun run --filter frontend check
 ```
 
-- Commit the changes.
-
-Regenerate the client whenever backend changes affect the OpenAPI schema.
+The check runs in the frontend workspace and honors native Git ignore rules, so
+Playwright's runtime artifacts are not treated as authored sources.
 
 ## Using a Remote API
 
