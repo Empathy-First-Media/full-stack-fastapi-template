@@ -1,11 +1,7 @@
 #! /usr/bin/env bash
 
-set -e
-set -x
+set -euo pipefail
 
-cd backend
-FASTAPI_ENV=development uv run python -c "import app.main; import json; print(json.dumps(app.main.app.openapi()))" > ../openapi.json
-cd ..
-mv openapi.json frontend/
-bun run --filter frontend generate-client
-bun run lint
+uv run --no-active --directory backend --locked --no-sync \
+  python scripts/export_openapi.py --output ../frontend/openapi.json "$@"
+bun run --filter frontend generate-client --no-log-file

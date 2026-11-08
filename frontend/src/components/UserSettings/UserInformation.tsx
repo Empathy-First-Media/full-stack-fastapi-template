@@ -157,7 +157,13 @@ const UserInformation = () => {
                 </Button>
               </>
             ) : (
-              <Button type="button" onClick={toggleEditMode}>
+              <Button
+                type="button"
+                onClick={toggleEditMode}
+                disabled={
+                  !currentUser?.permissions.includes("org:projects:write")
+                }
+              >
                 Edit
               </Button>
             )}

@@ -34,3 +34,5 @@ extend-ignore-re = [
 
 [tool.typos.default.extend-identifiers]
 alls = "alls"
+# PostgreSQL RangeVar inheritance flag, exposed verbatim by pglast's native AST.
+inh = "inh"

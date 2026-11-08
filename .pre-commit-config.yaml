@@ -1,5 +1,7 @@
-# See https://pre-commit.com for more information
-# See https://pre-commit.com/hooks.html for more hooks
+# Native prek contract: checks never synchronize dependencies or rewrite sources.
+# Mutating vendor hooks have no check API and are deliberately manual-only.
+# https://github.com/j178/prek/blob/b7eb6027125de7e3b67dd94039a4f69abf3a5fb0/docs/reference/cli.md
+default_stages: [pre-commit]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
@@ -10,12 +12,14 @@ repos:
         args:
           - --unsafe
       - id: end-of-file-fixer
+        stages: [manual]
         exclude: |
-            (?x)^(
-                frontend/src/client/.*|
-                backend/app/email-templates/.*
-            )$
+          (?x)^(
+              frontend/src/client/.*|
+              backend/app/email-templates/.*
+          )$
       - id: trailing-whitespace
+        stages: [manual]
         exclude: ^frontend/src/client/.*
   - repo: https://github.com/crate-ci/typos
     rev: 7f9d0819ca1c008ade73f4b41fa9d258d48f605b # frozen: v1.51.1
@@ -26,40 +30,43 @@ repos:
     hooks:
       - id: local-biome-check
         name: biome check
-        entry: npm run lint
+        entry: bun run --filter frontend check
         language: system
         types: [text]
         files: ^frontend/
+        pass_filenames: false
+        require_serial: true
 
       - id: local-ruff-check
         name: ruff check
-        entry: uv run ruff check --force-exclude --fix --exit-non-zero-on-fix
+        entry: uv run --frozen --no-sync ruff check --force-exclude
         require_serial: true
         language: unsupported
         types: [python]
 
       - id: local-ruff-format
         name: ruff format
-        entry: uv run ruff format --force-exclude --exit-non-zero-on-format
+        entry: uv run --frozen --no-sync ruff format --force-exclude --check
         require_serial: true
         language: unsupported
         types_or: [python, markdown]
 
       - id: local-mypy
         name: mypy check
-        entry: uv run mypy backend/app
+        entry: uv run --frozen --no-sync --directory backend mypy app
         require_serial: true
         language: unsupported
         pass_filenames: false
 
       - id: local-ty
         name: ty check
-        entry: uv run ty check backend/app
+        entry: uv run --frozen --no-sync --directory backend ty check app
         require_serial: true
         language: unsupported
         pass_filenames: false
 
       - id: generate-frontend-sdk
+        stages: [manual]
         name: Generate Frontend SDK
         entry: bash ./scripts/generate-client.sh
         pass_filenames: false
@@ -67,16 +74,17 @@ repos:
         files: ^backend/app/.*\.py$|^backend/pyproject\.toml$|^uv\.lock$|^frontend/openapi-ts\.config\.ts$|^scripts/generate-client\.sh$
 
       - id: add-release-date
+        stages: [manual]
         language: unsupported
         name: add date to latest release header
-        entry: uv run python scripts/add_latest_release_date.py
+        entry: uv run --frozen --no-sync python scripts/add_latest_release_date.py
         files: ^release-notes\.md$
         pass_filenames: false
 
       - id: zizmor
         name: zizmor
-        language: python
-        entry: uv run zizmor .
+        language: unsupported
+        entry: uv run --frozen --no-sync zizmor .
         files: ^\.github\/workflows\/
         require_serial: true
         pass_filenames: false

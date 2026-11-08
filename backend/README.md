@@ -1,145 +1,170 @@
-# FastAPI Project - Backend
+# FastAPI backend
 
-## Requirements
+## Runtime contract
 
-* [Docker](https://www.docker.com/).
-* [uv](https://docs.astral.sh/uv/) for Python package and environment management.
+The browser uses WorkOS AuthKit React. The API verifies signed access tokens with
+PyJWT's native JWKS client; it does not issue tokens, exchange OAuth codes, store
+refresh tokens, or accept local passwords. Signup, password recovery, password
+changes, private user provisioning and global-superuser authorization are retired.
 
-## Local Development
+Configure these variables explicitly for the selected environment/application:
 
-Run the backend locally and connect it to PostgreSQL in Docker Compose.
+| Variable | Required value |
+| --- | --- |
+| `PROJECT_NAME` | Application display name |
+| `FRONTEND_HOST` | Exact browser origin/SDK redirect destination |
+| `DATABASE_URL` | Existing canonical product database, dedicated non-superuser `NOBYPASSRLS` runtime login |
+| `WORKOS_CLIENT_ID` | Approved application client ID |
+| `WORKOS_ISSUER` | Exact trusted HTTPS issuer |
+| `WORKOS_JWKS_URL` | Explicit trusted HTTPS signing-key endpoint |
+| `WORKOS_API_HOSTNAME` | Authentication API hostname supplied to AuthKit React |
 
-From the project root, start PostgreSQL and Mailpit:
+`FASTAPI_ENV=development` allows local HTTP browser origins. Leave it unset in
+production, which requires HTTPS and a custom Authentication API hostname.
+Issuer, signing JWKS and browser API hostname are separately owner-configured;
+the API does not infer one from another. Missing settings refuse startup. No
+catalog/staging credential fallback exists. No WorkOS API key is needed by this
+resource server. SMTP and Sentry settings remain optional non-auth utilities.
 
-```console
-$ docker compose up -d db mailpit
-```
+Public `GET /api/v1/auth/config` returns only `client_id`, `api_hostname` and
+`redirect_uri`. `GET /api/v1/users/me` returns the stable local UUID/profile,
+canonical TEXT tenant ID, canonical identity UUID, and verified `user_role`,
+`permissions`, `is_tenant_admin`. Neither endpoint exposes server credentials.
 
-Then, from `./backend/`, install the dependencies, prepare the database, and start the development server:
+## Identity and authorization
 
-```console
-$ uv sync
-$ uv run bash scripts/prestart.sh
-$ uv run fastapi dev
-```
+The existing product owner maintains `public.tenants`, `identity_entity`,
+`identity_external`, WorkOS projections and the private issuer/client cutover
+gate. The API reflects their real metadata and never creates or copies them.
+The verified WorkOS subject resolves through its provider-scoped canonical
+crosswalk, the exact enabled issuer/client gate, the selected organization and
+one active projected membership. Unknown, ambiguous or mismatched associations
+deny access. Email equality is never an identity link or provisioning rule.
+Local `User.id` remains a UUID; tenant IDs retain the canonical owner's TEXT type.
 
-The API is available at `http://localhost:8000`, with automatic interactive docs at `http://localhost:8000/docs`.
+Every business action requires `org:projects:read`/`org:projects:write` as
+appropriate. Administrators are selected-tenant administrators, not global
+operators. Ordinary users access their own items; tenant administrators can
+access items in their selected tenant only. Account administration also requires
+explicit action permission. Profile changes cannot mutate tenant/identity/role;
+item changes cannot mutate tenant/owner attribution.
 
-## General Workflow
+A tenant administrator may create a local profile only for an existing,
+same-tenant canonical user with an explicit WorkOS binding. This is not a WorkOS
+invite, membership creation, role grant or reactivation. A profile for a revoked
+member confers no access: authentication independently checks active membership.
+Other users' private membership rows are not exposed for profile creation.
 
-Run backend commands from `./backend/` with `uv run`. Make sure your editor uses the Python interpreter at `.venv/bin/python` in the project root.
+Profile emails are unique within a tenant, not globally. PostgreSQL's
+`uq_user_tenant_email` constraint is authoritative when RLS hides another profile
+or concurrent writes race. Duplicate canonical profiles likewise return the
+existing HTTP 409 conflict. These specific violations roll back; unrelated
+constraint errors remain visible. Identical emails in different tenants remain
+allowed.
 
-Modify or add SQLModel models for data and SQL tables in `./backend/app/models.py`, API endpoints in `./backend/app/api/`, CRUD (Create, Read, Update, Delete) utils in `./backend/app/crud.py`.
+Profile writes flush and capture their public state inside the transaction,
+then return it only after commit. They do not re-read a profile after its own
+deactivation has revoked access; a successful deactivation response is not
+turned into an ambiguous post-commit failure.
 
-## VS Code
+`VerifiedSession` installs the fixed `authenticated` role and verified claims with
+transaction-local PostgreSQL settings on every actual transaction, including
+post-commit ORM reloads. Reserved `api_*` input claims are discarded. Canonical
+resolution then adds `api_tenant_id`, `api_identity_entity_id`, and finally
+`api_user_id` after the active local actor resolves. RLS owns the matching
+bootstrap/read/write distinction. Commit, rollback and pool return cannot retain
+a previous request's role or claims.
 
-There are already configurations in place to run the backend through the VS Code debugger, so that you can use breakpoints, pause and explore variables, etc.
+## Native dependency and development commands
 
-The setup is also already configured so you can run the tests through the VS Code Python tests tab.
-
-## Full Stack with Docker Compose
-
-To run the backend and built frontend in Docker Compose:
-
-```console
-$ docker compose run --rm backend bash scripts/prestart.sh
-$ docker compose watch
-```
-
-The application is available at `http://localhost:8000`.
-
-### Docker Compose Override
-
-The `compose.override.yml` file contains local settings for published ports, source synchronization, automatic image rebuilds, and backend reloads. Docker Compose applies it automatically when you run `docker compose` without an explicit file list.
-
-To open a shell in the backend container:
-
-```console
-$ docker compose exec backend bash
-```
-
-## Backend Tests
-
-To test the backend from the `backend` directory, run:
-
-```console
-$ uv run bash scripts/test.sh
-```
-
-The tests run with Pytest. Modify existing tests or add new ones in `./backend/tests/`.
-
-If you use GitHub Actions, the tests will run automatically.
-
-### Test a Running Stack
-
-If your stack is already up and you just want to run the tests, you can use:
-
-```bash
-docker compose exec backend bash scripts/tests-start.sh
-```
-
-The `/app/backend/scripts/tests-start.sh` script calls `pytest`. If you need to pass extra arguments to `pytest`, you can pass them to that command and they will be forwarded.
-
-For example, to stop on first error:
-
-```bash
-docker compose exec backend bash scripts/tests-start.sh -x
-```
-
-### Test Coverage
-
-When the tests run, they generate `htmlcov/index.html`. Open it in your browser to inspect the test coverage.
-
-## Migrations
-
-Make sure you create a revision of your models and upgrade the database with that revision every time you change them. From the `backend` directory, use `uv` to run Alembic against the PostgreSQL container:
-
-* Alembic is already configured to import your SQLModel models from `./backend/app/models.py`.
-
-* After changing a model (for example, adding a column), create a revision:
+From this upstream repository's root:
 
 ```console
-$ uv run alembic revision --autogenerate -m "Add column last_name to User model"
+uv sync --locked --package app
+uv run --package app --directory backend fastapi dev
 ```
 
-* Commit to the git repository the files generated in the alembic directory.
+An embedding workspace must set its declared external `UV_PROJECT_ENVIRONMENT`
+(for example its API-owned environment) rather than using or modifying the
+parent project's environment. Authentication settings must be supplied even for
+OpenAPI generation; use explicit fixture settings for nonproduction generation.
 
-* After creating the revision, run the migration in the database (this is what will actually change the database):
+## API namespace migrations
+
+Only API-owned entities, policies and the Alembic ledger belong in schema `api`.
+Canonical product schemas and cross-owner grants have separate owners. Do not
+run the legacy public migration history, `SQLModel.metadata.create_all`, or any
+initial/global-superuser seed against the product database.
+
+After native generation, review, isolation, recovery and grant gates, the exact
+migration command from `backend/` is:
 
 ```console
-$ uv run alembic upgrade head
+uv run --no-active --locked --no-sync alembic -c alembic-api.ini upgrade api@head
 ```
 
-If you don't want to use migrations at all, uncomment the lines in the file at `./backend/app/core/db.py` that end in:
+The migration owner requires a separately supplied
+`API_MIGRATION_DATABASE_URL`, distinct from the runtime login, an existing
+owner-provisioned `api` schema, and an explicit reviewed API revision branch.
+`backend/scripts/prestart.sh` invokes only that command, never a seed. It refuses
+application when the reviewed branch or prerequisites are absent. Migration
+credentials must not be injected into the long-lived backend process.
 
-```python
-SQLModel.metadata.create_all(engine)
-```
+The narrowly scoped actor-status function uses PostgreSQL `SECURITY DEFINER`
+with an empty search path and `row_security=off`. Its migration owner must have
+native RLS-bypass authority; generation/application refuse insufficient or
+incorrect function ownership. The runtime login never receives that authority.
 
-and comment the line in the file `scripts/prestart.sh` that contains:
+Policy autogeneration uses Alembic's documented operation rewriter and the
+vendor's SQL statements, preserving permission literals in immutable SQL
+operations. Old-policy reflection shares the original repeatable-read snapshot;
+runtime/application isolation is unchanged. Review both directions. Restoring
+an older revision restores its historical policy semantics, not necessarily a
+security-ready rollback target.
+
+## Tests and evidence
+
+Token/config/schema tests use explicit signed-token and transport fixtures, not
+production credentials. From the upstream root:
 
 ```console
-$ alembic upgrade head
+uv run --no-active --locked --no-sync --package app --directory backend pytest tests/test_workos_security.py tests/test_data_namespace.py tests/api/routes/test_login.py tests/api/routes/test_private.py
 ```
 
-If you don't want to start with the default models and want to remove them / modify them, from the beginning, without having any previous revision, you can remove the revision files (`.py` Python files) under `./backend/app/alembic/versions/`. And then create a first migration as described above.
+SQL/route tests execute real PostgreSQL transactions and RLS. Provision the
+approved isolated canonical baseline and reviewed API namespace before running
+all tests. Required test inputs are:
 
-## Email Templates
+- `API_TEST_DATABASE_URL`: non-superuser `NOBYPASSRLS` runtime login.
+- `API_TEST_ADMIN_DATABASE_URL`: isolated fixture writer, never production.
+- `API_TEST_MIGRATION_DATABASE_URL`: isolated privileged migration authority.
+- `API_TEST_ACTORS`: JSON object with `admin`, `member`, `foreign_admin`,
+  `unprofiled`, `revoked`; each existing canonical fixture actor supplies
+  `subject`, `organization_id`, `user_role`, `tenant_id` (TEXT),
+  `identity_entity_id` (UUID). Admin/member/unprofiled/revoked belong to the first
+  tenant, foreign_admin to a different tenant; revoked membership is inactive.
+- The isolated database name starts `api_test_`, or an approved
+  `API_TEST_SUPABASE_BRANCH_REF` matches its connection target. Known production
+  and catalog-staging references are rejected even with a test-shaped database
+  name; the actual PostgreSQL database must match the selected URI.
 
-The email templates are written with [React Email](https://react.email) in `./packages/react-email/`. The `emails` directory holds one component per email and the `ui` directory holds the shared components (layout, heading, button, link, callout).
-
-The rendered HTML in `./backend/app/email-templates/` is generated from those components. It is what the application sends and should not be edited by hand.
-
-To preview the emails while editing them, start the dev server from the root of the project:
+The isolated gate must trust `https://auth.fixture.test/` and `client_fixture`.
+Tests create/clean only the named fixture actors' API-local profiles/items. They
+never create schema, seed canonical identity, grant roles, or delete all data.
+Missing infrastructure fails explicitly; it is not silently replaced by SQLite.
 
 ```console
-$ bun run email:dev
+uv run --no-active --locked --no-sync --package app --directory backend pytest
 ```
 
-Values coming from the backend are declared as Jinja placeholders in the component props, for example `username = "{{ username }}"`. The context for each email is built in `generate_*_email()` in `./backend/app/utils.py`, so a new placeholder needs to be added there too.
+CI validates all three real targets before applying migrations. Route and RLS
+cases share the same canonical actor input and claims producer, rather than
+separate copied tenant/identity/claim settings. Docker/browser jobs are public
+configuration/UI network-fixture checks, not SQL/RLS or real sign-in evidence.
+Run workflow auditing, backend typing/lint, native client regeneration and browser
+checks through their owners after all edits land.
 
-Once you are done, regenerate the templates used by the application:
-
-```console
-$ bun run email:export
-```
+Production admission additionally requires recovery/restore evidence, approved
+schema/grants, verified WorkOS domain/URLs, real sign-in/sign-out/external login,
+and same/cross-tenant direct/gateway operations. Passing fixtures does not satisfy
+those gates. See [deployment](../deployment.md).

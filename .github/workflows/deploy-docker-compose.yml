@@ -16,17 +16,22 @@ jobs:
     if: github.repository != 'fastapi/full-stack-fastapi-template'
     runs-on: self-hosted
     timeout-minutes: 30
+    environment: production
+    # Required reviewers/environment protection need native owner readback before use.
     env:
       DOMAIN: ${{ vars.DOMAIN }}
       PROJECT_NAME: ${{ vars.PROJECT_NAME }}
-      SECRET_KEY: ${{ secrets.SECRET_KEY }}
-      FIRST_SUPERUSER: ${{ vars.FIRST_SUPERUSER }}
-      FIRST_SUPERUSER_PASSWORD: ${{ secrets.FIRST_SUPERUSER_PASSWORD }}
+      FRONTEND_HOST: ${{ vars.FRONTEND_HOST }}
+      WORKOS_CLIENT_ID: ${{ vars.WORKOS_CLIENT_ID }}
+      WORKOS_ISSUER: ${{ vars.WORKOS_ISSUER }}
+      WORKOS_JWKS_URL: ${{ vars.WORKOS_JWKS_URL }}
+      WORKOS_API_HOSTNAME: ${{ vars.WORKOS_API_HOSTNAME }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      API_MIGRATION_DATABASE_URL: ${{ secrets.API_MIGRATION_DATABASE_URL }}
       SMTP_HOST: ${{ vars.SMTP_HOST }}
       SMTP_USER: ${{ vars.SMTP_USER }}
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
       EMAILS_FROM_EMAIL: ${{ vars.EMAILS_FROM_EMAIL }}
-      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
       SENTRY_DSN: ${{ vars.SENTRY_DSN }}
     steps:
       - name: Checkout
@@ -36,6 +41,6 @@ jobs:
       - name: Build
         run: docker compose -f compose.yml -f compose.deploy.yml build
       - name: Prepare database
-        run: docker compose -f compose.yml -f compose.deploy.yml run --rm backend bash scripts/prestart.sh
+        run: docker compose -f compose.yml -f compose.deploy.yml run --rm migrate
       - name: Start application
         run: docker compose -f compose.yml -f compose.deploy.yml up -d

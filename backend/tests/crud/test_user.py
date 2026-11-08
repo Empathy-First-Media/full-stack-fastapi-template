@@ -1,130 +1,135 @@
-from fastapi.encoders import jsonable_encoder
-from pwdlib.hashers.bcrypt import BcryptHasher
-from sqlmodel import Session
+import json
+from uuid import UUID
 
-from app import crud
-from app.core.security import verify_password
-from app.models import User, UserCreate, UserUpdate
-from tests.utils.utils import random_email, random_lower_string
+import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from sqlmodel import select
 
-
-def test_create_user(db: Session) -> None:
-    email = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=email, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-    assert user.email == email
-    assert hasattr(user, "hashed_password")
+from app.api import deps
+from app.core.auth import VerifiedSession, resolve_principal
+from app.models import Item, User
 
 
-def test_authenticate_user(db: Session) -> None:
-    email = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=email, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-    authenticated_user = crud.authenticate(session=db, email=email, password=password)
-    assert authenticated_user
-    assert user.email == authenticated_user.email
+def verified_session(runtime_engine, issue_token, actor, **claims):
+    encoded = issue_token(actor, **claims)["Authorization"].removeprefix("Bearer ")
+    token = deps.get_token_verifier().verify(encoded)
+    return VerifiedSession(runtime_engine, info={"verified_token": token}), token
 
 
-def test_not_authenticate_user(db: Session) -> None:
-    email = random_email()
-    password = random_lower_string()
-    user = crud.authenticate(session=db, email=email, password=password)
-    assert user is None
+def test_identity_reinstalled_on_every_transaction_and_cleared_on_pool_return(
+    runtime_engine, fixture_actors, issue_token
+):
+    actor = fixture_actors["admin"]
+    session, token = verified_session(runtime_engine, issue_token, actor)
+    with session:
+        principal = resolve_principal(session, token)
+        for _ in range(3):
+            session.commit()
+            claims = json.loads(
+                session.execute(
+                    text("SELECT current_setting('request.jwt.claims')")
+                ).scalar_one()
+            )
+            assert claims["sub"] == actor["subject"]
+            assert claims["org_id"] == actor["organization_id"]
+            assert claims["api_tenant_id"] == actor["tenant_id"]
+            assert claims["api_user_id"] == str(principal.user.id)
+            assert (
+                session.execute(text("SELECT current_user")).scalar_one()
+                == "authenticated"
+            )
+            # Post-commit ORM expiry uses the same actual listener boundary.
+            assert session.get(User, UUID(actor["id"])).tenant_id == actor["tenant_id"]
+    with runtime_engine.connect() as connection:
+        current, original, claims = connection.execute(
+            text(
+                "SELECT current_user, session_user, current_setting('request.jwt.claims', true)"
+            )
+        ).one()
+        assert current == original
+        assert claims in (None, "")
 
 
-def test_check_if_user_is_active(db: Session) -> None:
-    email = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=email, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-    assert user.is_active is True
-
-
-def test_check_if_user_is_active_inactive(db: Session) -> None:
-    email = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=email, password=password, is_active=False)
-    user = crud.create_user(session=db, user_create=user_in)
-    assert user.is_active is False
-
-
-def test_check_if_user_is_superuser(db: Session) -> None:
-    email = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=email, password=password, is_superuser=True)
-    user = crud.create_user(session=db, user_create=user_in)
-    assert user.is_superuser is True
-
-
-def test_check_if_user_is_superuser_normal_user(db: Session) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-    assert user.is_superuser is False
-
-
-def test_get_user(db: Session) -> None:
-    password = random_lower_string()
-    username = random_email()
-    user_in = UserCreate(email=username, password=password, is_superuser=True)
-    user = crud.create_user(session=db, user_create=user_in)
-    user_2 = db.get(User, user.id)
-    assert user_2
-    assert user.email == user_2.email
-    assert jsonable_encoder(user) == jsonable_encoder(user_2)
-
-
-def test_update_user(db: Session) -> None:
-    password = random_lower_string()
-    email = random_email()
-    user_in = UserCreate(email=email, password=password, is_superuser=True)
-    user = crud.create_user(session=db, user_create=user_in)
-    new_password = random_lower_string()
-    user_in_update = UserUpdate(password=new_password, is_superuser=True)
-    if user.id is not None:
-        crud.update_user(session=db, db_user=user, user_in=user_in_update)
-    user_2 = db.get(User, user.id)
-    assert user_2
-    assert user.email == user_2.email
-    verified, _ = verify_password(new_password, user_2.hashed_password)
-    assert verified
-
-
-def test_authenticate_user_with_bcrypt_upgrades_to_argon2(db: Session) -> None:
-    """Test that a user with bcrypt password hash gets upgraded to argon2 on login."""
-    email = random_email()
-    password = random_lower_string()
-
-    # Create a bcrypt hash directly (simulating legacy password)
-    bcrypt_hasher = BcryptHasher()
-    bcrypt_hash = bcrypt_hasher.hash(password)
-    assert bcrypt_hash.startswith("$2")  # bcrypt hashes start with $2
-
-    # Create user with bcrypt hash directly in the database
-    user = User(email=email, hashed_password=bcrypt_hash)
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    # Verify the hash is bcrypt before authentication
-    assert user.hashed_password.startswith("$2")
-
-    # Authenticate - this should upgrade the hash to argon2
-    authenticated_user = crud.authenticate(session=db, email=email, password=password)
-    assert authenticated_user
-    assert authenticated_user.email == email
-
-    db.refresh(authenticated_user)
-
-    # Verify the hash was upgraded to argon2
-    assert authenticated_user.hashed_password.startswith("$argon2")
-
-    verified, updated_hash = verify_password(
-        password, authenticated_user.hashed_password
+def test_signed_api_claims_cannot_spoof_local_actor(
+    runtime_engine, fixture_actors, issue_token
+):
+    actor = fixture_actors["member"]
+    foreign = fixture_actors["foreign_admin"]
+    session, token = verified_session(
+        runtime_engine,
+        issue_token,
+        actor,
+        api_user_id=foreign["id"],
+        api_tenant_id=foreign["tenant_id"],
+        api_identity_entity_id=foreign["identity_entity_id"],
     )
-    assert verified
-    # Should not need another update since it's already argon2
-    assert updated_hash is None
+    with session:
+        principal = resolve_principal(session, token)
+        assert str(principal.user.id) == actor["id"]
+        claims = json.loads(
+            session.execute(
+                text("SELECT current_setting('request.jwt.claims')")
+            ).scalar_one()
+        )
+        assert claims["api_user_id"] == actor["id"]
+        assert claims["api_tenant_id"] == actor["tenant_id"]
+
+
+def test_direct_sql_does_not_bypass_tenant_rls(
+    runtime_engine, fixture_actors, issue_token, client
+):
+    owner = fixture_actors["foreign_admin"]
+    created = client.post(
+        "/api/v1/items/",
+        headers=issue_token(owner),
+        json={"title": "Foreign direct SQL fixture"},
+    )
+    assert created.status_code == 200
+    session, token = verified_session(
+        runtime_engine, issue_token, fixture_actors["admin"]
+    )
+    with session:
+        resolve_principal(session, token)
+        assert (
+            session.exec(
+                select(Item).where(Item.id == UUID(created.json()["id"]))
+            ).first()
+            is None
+        )
+        assert (
+            session.exec(select(User).where(User.id == UUID(owner["id"]))).first()
+            is None
+        )
+
+
+def test_database_rejects_item_tenant_or_owner_reassignment(
+    runtime_engine, fixture_actors, issue_token, client
+):
+    actor = fixture_actors["member"]
+    created = client.post(
+        "/api/v1/items/",
+        headers=issue_token(actor),
+        json={"title": "Immutable direct SQL fixture"},
+    )
+    assert created.status_code == 200
+    session, token = verified_session(runtime_engine, issue_token, actor)
+    with session:
+        resolve_principal(session, token)
+        item = session.get(Item, UUID(created.json()["id"]))
+        assert item is not None
+        item.tenant_id = fixture_actors["foreign_admin"]["tenant_id"]
+        with pytest.raises(DBAPIError):
+            session.commit()
+        session.rollback()
+    session, token = verified_session(
+        runtime_engine, issue_token, fixture_actors["admin"]
+    )
+    with session:
+        resolve_principal(session, token)
+        item = session.get(Item, UUID(created.json()["id"]))
+        assert item is not None
+        item.owner_id = UUID(fixture_actors["admin"]["id"])
+        with pytest.raises(DBAPIError):
+            session.commit()
+        session.rollback()

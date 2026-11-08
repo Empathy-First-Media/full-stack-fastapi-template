@@ -1,5 +1,5 @@
 import { useSuspenseQuery } from "@tanstack/react-query"
-import { createFileRoute, redirect } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { Suspense } from "react"
 
 import { type UserPublic, UsersService } from "@/client"
@@ -11,22 +11,15 @@ import useAuth from "@/hooks/useAuth"
 
 function getUsersQueryOptions() {
   return {
-    queryFn: async () =>
-      (await UsersService.readUsers({ query: { skip: 0, limit: 100 } })).data,
+    queryFn: async ({ signal }: { signal: AbortSignal }) =>
+      (await UsersService.readUsers({ query: { skip: 0, limit: 100 }, signal }))
+        .data,
     queryKey: ["users"],
   }
 }
 
 export const Route = createFileRoute("/_layout/admin")({
   component: Admin,
-  beforeLoad: async () => {
-    const { data: user } = await UsersService.readUserMe()
-    if (!user.is_superuser) {
-      throw redirect({
-        to: "/",
-      })
-    }
-  },
   head: () => ({
     meta: [
       {
@@ -57,6 +50,9 @@ function UsersTable() {
 }
 
 function Admin() {
+  const { user } = useAuth()
+  if (!user?.is_tenant_admin || !user.permissions.includes("org:projects:read"))
+    return <p role="alert">Tenant administrator access required.</p>
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -66,7 +62,7 @@ function Admin() {
             Manage user accounts and permissions
           </p>
         </div>
-        <AddUser />
+        {user.permissions.includes("org:projects:write") && <AddUser />}
       </div>
       <UsersTable />
     </div>

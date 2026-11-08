@@ -2,22 +2,24 @@
 
 ## Local Development
 
-For local development, run PostgreSQL and Mailpit with Docker Compose, and run the FastAPI and Vite development servers locally.
+Use an approved isolated copy of the canonical product PostgreSQL baseline, with
+its existing tenants, identity crosswalk and WorkOS projections. An empty local
+template database is not an authentication authority. Configure the explicit
+runtime/WorkOS variables listed in [backend/README.md](backend/README.md), using
+`FASTAPI_ENV=development` and the exact local browser origin registered with the
+selected nonproduction WorkOS application.
 
-Start the supporting services:
+From the upstream root, sync its independent native solve:
 
 ```bash
-docker compose up -d db mailpit
+uv sync --locked --package app
 ```
 
-Then, from the `backend` directory, install the dependencies and prepare the database:
+An embedding workspace must select its declared external API environment instead
+of modifying the parent's Python environment. Migration generation/application
+requires separate reviewed authority; it is not an automatic development seed.
 
-```bash
-uv sync
-uv run bash scripts/prestart.sh
-```
-
-Start the FastAPI development server:
+Start FastAPI from `backend/` after provisioning the approved baseline:
 
 ```bash
 uv run fastapi dev
@@ -38,7 +40,6 @@ Backend API: <http://localhost:8000>
 
 Automatic interactive API documentation with Swagger UI: <http://localhost:8000/docs>
 
-Mailpit: <http://localhost:8025>
 
 The frontend development server uses the backend at `http://localhost:8000`, as configured in `frontend/.env`.
 
@@ -57,7 +58,8 @@ The build is written to `backend/app/frontend` and served by FastAPI at <http://
 To run the backend and built frontend in Docker Compose:
 
 ```bash
-docker compose run --rm backend bash scripts/prestart.sh
+docker compose build
+docker compose run --rm migrate
 docker compose watch
 ```
 
@@ -67,7 +69,6 @@ Application, with the frontend and API served by FastAPI: <http://localhost:8000
 
 Automatic interactive API documentation with Swagger UI: <http://localhost:8000/docs>
 
-Adminer, database web administration: <http://localhost:8080>
 
 Traefik UI, to see how the routes are being handled by the proxy: <http://localhost:8090>
 
@@ -99,7 +100,11 @@ docker compose watch
 
 ## The `.env` File
 
-The tracked `.env` file contains local development defaults, passwords, and other configuration. Its hostnames use `localhost` for processes running on your machine. Docker Compose overrides hostnames such as the database and SMTP server with their Compose service names.
+Local environment files may supply explicitly selected nonproduction settings.
+The backend/Compose now require `DATABASE_URL` and `WORKOS_*`; legacy template
+passwords are not usable credentials. Compose does not start a replacement
+product database. Never commit database URLs, provider keys or production
+secrets. Supply the migration URL only to the maintenance migration service.
 
 Do not store deployment secrets in `.env`. Configure them as described in the [FastAPI Cloud deployment guide](./deployment.md) or the [Docker Compose deployment guide](./deployment-docker-compose.md).
 

@@ -8,11 +8,13 @@ import { DataTable } from "@/components/Common/DataTable"
 import AddItem from "@/components/Items/AddItem"
 import { columns } from "@/components/Items/columns"
 import PendingItems from "@/components/Pending/PendingItems"
+import useAuth from "@/hooks/useAuth"
 
 function getItemsQueryOptions() {
   return {
-    queryFn: async () =>
-      (await ItemsService.readItems({ query: { skip: 0, limit: 100 } })).data,
+    queryFn: async ({ signal }: { signal: AbortSignal }) =>
+      (await ItemsService.readItems({ query: { skip: 0, limit: 100 }, signal }))
+        .data,
     queryKey: ["items"],
   }
 }
@@ -55,6 +57,9 @@ function ItemsTable() {
 }
 
 function Items() {
+  const { user } = useAuth()
+  if (!user?.permissions.includes("org:projects:read"))
+    return <p role="alert">Project read access required.</p>
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -62,7 +67,7 @@ function Items() {
           <h1 className="text-2xl font-bold tracking-tight">Items</h1>
           <p className="text-muted-foreground">Create and manage your items</p>
         </div>
-        <AddItem />
+        {user.permissions.includes("org:projects:write") && <AddItem />}
       </div>
       <ItemsTable />
     </div>

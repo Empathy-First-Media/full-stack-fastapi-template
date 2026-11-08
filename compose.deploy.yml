@@ -1,5 +1,4 @@
 services:
-
   proxy:
     restart: always
     ports:
@@ -31,23 +30,8 @@ services:
       # Enable the Traefik log, for configurations and errors
       - --log
 
-  db:
-    restart: always
-
-  adminer:
-    restart: always
-    labels:
-      # Route HTTPS traffic for the Adminer subdomain
-      - traefik.http.routers.adminer-https.rule=Host(`adminer.${DOMAIN:?Variable not set}`)
-      - traefik.http.routers.adminer-https.entrypoints=https
-      - traefik.http.routers.adminer-https.tls=true
-      # Use the Let's Encrypt resolver
-      - traefik.http.routers.adminer-https.tls.certresolver=le
-
   backend:
     restart: always
-    environment:
-      FRONTEND_HOST: https://${DOMAIN:?Variable not set}
     labels:
       # Route HTTPS traffic for this domain
       - traefik.http.routers.backend-https.rule=Host(`${DOMAIN:?Variable not set}`)

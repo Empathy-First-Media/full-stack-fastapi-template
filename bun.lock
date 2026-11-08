@@ -28,6 +28,7 @@
         "@tanstack/react-router": "^1.170.46",
         "@tanstack/react-router-devtools": "^1.167.2",
         "@tanstack/react-table": "^9.3.1",
+        "@workos-inc/authkit-react": "^0.16.3",
         "axios": "1.20.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -602,6 +603,10 @@
     "@types/ws": ["@types/ws@8.18.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg=="],
 
     "@vitejs/plugin-react-swc": ["@vitejs/plugin-react-swc@4.3.3", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.1", "@swc/core": "^1.15.46" }, "peerDependencies": { "vite": "^4 || ^5 || ^6 || ^7 || ^8" } }, "sha512-bti8ZAcvz4Lh6/e4Uk2k3aa1TiUXbbMsahuqOHvd3MveFTkKDZOA6wQVkpj7J/+tepX/wGfe+lsGh/t24HTXMQ=="],
+
+    "@workos-inc/authkit-js": ["@workos-inc/authkit-js@0.20.5", "", {}, "sha512-5e3C0xTMMlnDlaVAIOCk/G91W83lpb9ChPolCxTOQCkCuwn3w5qfuJze+5UNOIX1RRZv6rnzyb2FRfPdSThDkw=="],
+
+    "@workos-inc/authkit-react": ["@workos-inc/authkit-react@0.16.3", "", { "dependencies": { "@workos-inc/authkit-js": "^0.20.4" }, "peerDependencies": { "react": ">=17" } }, "sha512-0dBvUp/ZEF/yrojfDHK9T/eMmNxMtH7HbWZvA8Aum5wRn874Yr0wraAFr/wAKBRJYoYLCcfYwSEDlYTjKTk2sQ=="],
 
     "accepts": ["accepts@1.3.8", "", { "dependencies": { "mime-types": "~2.1.34", "negotiator": "0.6.3" } }, "sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw=="],
 

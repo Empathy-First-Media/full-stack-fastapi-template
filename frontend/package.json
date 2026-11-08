@@ -8,9 +8,10 @@
     "build": "tsc -p tsconfig.build.json && vite build",
     "lint": "biome check --write --unsafe --no-errors-on-unmatched --files-ignore-unknown=true ./",
     "preview": "vite preview",
-    "generate-client": "openapi-ts",
+    "generate-client": "biome format --write openapi.json && openapi-ts",
     "test": "bunx playwright test",
-    "test:ui": "bunx playwright test --ui"
+    "test:ui": "bunx playwright test --ui",
+    "check": "biome check --no-errors-on-unmatched --files-ignore-unknown=true ./"
   },
   "dependencies": {
     "@hookform/resolvers": "^6.0.1",
@@ -32,6 +33,7 @@
     "@tanstack/react-router": "^1.170.46",
     "@tanstack/react-router-devtools": "^1.167.2",
     "@tanstack/react-table": "^9.3.1",
+    "@workos-inc/authkit-react": "^0.16.3",
     "axios": "1.20.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

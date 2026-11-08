@@ -40,13 +40,9 @@ export const columns: ColumnDef<DataTableFeatures, UserTableData>[] = [
     ),
   },
   {
-    accessorKey: "is_superuser",
-    header: "Role",
-    cell: ({ row }) => (
-      <Badge variant={row.original.is_superuser ? "default" : "secondary"}>
-        {row.original.is_superuser ? "Superuser" : "User"}
-      </Badge>
-    ),
+    accessorKey: "identity_entity_id",
+    header: "Canonical identity",
+    cell: ({ row }) => <span>{row.original.identity_entity_id}</span>,
   },
   {
     accessorKey: "is_active",

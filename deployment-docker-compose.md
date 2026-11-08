@@ -1,11 +1,14 @@
 # FastAPI Project - Docker Compose Deployment
 
-You can deploy the project to your own remote server with Docker Compose. The deployment configuration includes Traefik to handle HTTPS and route incoming traffic to the application.
+Deploy only after the identity, namespace, isolation, recovery and real-provider
+acceptance gates in [deployment.md](deployment.md) pass. The Compose profile uses
+the existing approved product database; it does not create a parallel template
+database or seed a local superuser. Traefik handles HTTPS application routing.
 
 ## Preparation
 
 * Have a remote server ready and available.
-* Configure DNS records pointing to the server for the application domain and any supporting service subdomains you want to expose, such as `fastapi-project.example.com` and `adminer.fastapi-project.example.com`.
+* Configure DNS for the application and the separately approved WorkOS Authentication API domain.
 * Install and configure [Docker](https://docs.docker.com/engine/install/) on the remote server (Docker Engine, not Docker Desktop).
 
 ## Copy the Code
@@ -20,13 +23,11 @@ The `--filter=":- .gitignore"` option tells `rsync` to use the same ignore rules
 
 ### Environment Variables
 
-Set the application domain, project name, and first superuser email:
-
-```bash
-export DOMAIN=fastapi-project.example.com
-export PROJECT_NAME="Full Stack FastAPI Project"
-export FIRST_SUPERUSER=admin@example.com
-```
+Set `DOMAIN`, `PROJECT_NAME`, `FRONTEND_HOST` and the explicitly approved
+`WORKOS_CLIENT_ID`, `WORKOS_ISSUER`, `WORKOS_JWKS_URL`,
+`WORKOS_API_HOSTNAME`. Production requires an HTTPS browser origin and custom
+Authentication API hostname. These are environment/application-specific values,
+not catalog/staging fallbacks.
 
 You can also configure these environment variables as needed:
 
@@ -37,13 +38,10 @@ You can also configure these environment variables as needed:
 
 ### Secrets
 
-Generate and set secure values for the database password, token signing key, and first superuser password:
-
-```bash
-export POSTGRES_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-export FIRST_SUPERUSER_PASSWORD="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-```
+Supply `DATABASE_URL` through the secret owner for the dedicated non-superuser,
+`NOBYPASSRLS` runtime login. Supply a distinct `API_MIGRATION_DATABASE_URL` only
+for the reviewed migration invocation; do not put it in the backend runtime.
+No WorkOS private key/API key or application password-signing secret is needed.
 
 To use an authenticated email provider, also set `SMTP_PASSWORD`.
 
@@ -52,17 +50,27 @@ To use an authenticated email provider, also set `SMTP_PASSWORD`.
 ```bash
 cd /root/code/app/
 docker compose -f compose.yml -f compose.deploy.yml build
-docker compose -f compose.yml -f compose.deploy.yml run --rm backend bash scripts/prestart.sh
+docker compose -f compose.yml -f compose.deploy.yml run --rm migrate
 docker compose -f compose.yml -f compose.deploy.yml up -d
 ```
 
 The `compose.deploy.yml` file adds HTTPS and automatic certificate handling to the shared `compose.yml` configuration. Explicitly listing both files excludes the local settings from `compose.override.yml`.
 
+The `migrate` maintenance service runs only
+`alembic -c alembic-api.ini upgrade api@head`. It refuses missing schema/branch
+prerequisites and never replays the legacy public ledger or seeds identities.
+The backend receives runtime credentials only. Review and restore-test the
+canonical baseline before migration, and read back real same/cross-tenant
+operations before admitting traffic.
+
 The backend Docker image builds the frontend, so the server does not need Bun or prebuilt frontend files.
 
 ## Deploy with GitHub Actions
 
-The included `.github/workflows/deploy-docker-compose.yml` workflow runs the deployment commands on the server when manually triggered from GitHub Actions.
+The included `.github/workflows/deploy-docker-compose.yml` is manual-only and
+selects the `production` GitHub environment. Required reviewers and environment
+protection are UNVERIFIED until native owner readback; the name alone is not a
+protection. Do not trigger it until protection and all production gates pass.
 
 Use a self-hosted runner only for a repository whose contributors and workflow code you trust. GitHub recommends using self-hosted runners with private repositories because workflows execute directly on the runner machine.
 
@@ -72,7 +80,11 @@ In the repository, go to **Settings** > **Secrets and variables** > **Actions** 
 
 * `DOMAIN`
 * `PROJECT_NAME`
-* `FIRST_SUPERUSER`
+* `FRONTEND_HOST`
+* `WORKOS_CLIENT_ID`
+* `WORKOS_ISSUER`
+* `WORKOS_JWKS_URL`
+* `WORKOS_API_HOSTNAME`
 
 To enable emails, add these optional repository variables:
 
@@ -84,9 +96,8 @@ To enable Sentry, add the optional `SENTRY_DSN` repository variable.
 
 Add these repository secrets:
 
-* `POSTGRES_PASSWORD`
-* `SECRET_KEY`
-* `FIRST_SUPERUSER_PASSWORD`
+* `DATABASE_URL` (runtime, non-bypass)
+* `API_MIGRATION_DATABASE_URL` (separate migration authority)
 
 To use an authenticated email provider, add the optional `SMTP_PASSWORD` repository secret.
 
@@ -126,4 +137,3 @@ Application (frontend and API): `https://fastapi-project.example.com`
 
 Interactive API docs: `https://fastapi-project.example.com/docs`
 
-Adminer: `https://adminer.fastapi-project.example.com`

@@ -1,521 +1,367 @@
-import uuid
-from unittest.mock import patch
+from uuid import uuid4
 
-from fastapi.testclient import TestClient
-from sqlmodel import Session, select
-
-from app import crud
-from app.core.config import settings
-from app.core.security import verify_password
-from app.models import User, UserCreate
-from tests.utils.user import create_random_user
-from tests.utils.utils import random_email, random_lower_string
+import pytest
 
 
-def test_get_users_superuser_me(
-    client: TestClient, superuser_token_headers: dict[str, str]
-) -> None:
-    r = client.get(f"{settings.API_V1_STR}/users/me", headers=superuser_token_headers)
-    current_user = r.json()
-    assert current_user
-    assert current_user["is_active"] is True
-    assert current_user["is_superuser"]
-    assert current_user["email"] == settings.FIRST_SUPERUSER
+def test_me_preserves_local_actor_and_exposes_verified_role(
+    client, fixture_actors, issue_token
+):
+    actor = fixture_actors["admin"]
+    response = client.get("/api/v1/users/me", headers=issue_token(actor))
+    assert response.status_code == 200
+    assert response.json()["id"] == actor["id"]
+    assert response.json()["tenant_id"] == actor["tenant_id"]
+    assert response.json()["identity_entity_id"] == actor["identity_entity_id"]
+    assert response.json()["user_role"] == "admin"
+    assert response.json()["is_tenant_admin"] is True
+    assert "is_superuser" not in response.json()
+    assert "hashed_password" not in response.json()
 
 
-def test_get_users_normal_user_me(
-    client: TestClient, normal_user_token_headers: dict[str, str]
-) -> None:
-    r = client.get(f"{settings.API_V1_STR}/users/me", headers=normal_user_token_headers)
-    current_user = r.json()
-    assert current_user
-    assert current_user["is_active"] is True
-    assert current_user["is_superuser"] is False
-    assert current_user["email"] == settings.EMAIL_TEST_USER
-
-
-def test_create_user_new_email(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    with (
-        patch("app.utils.send_email", return_value=None),
-        patch("app.core.config.settings.SMTP_HOST", "smtp.example.com"),
-        patch("app.core.config.settings.SMTP_USER", "admin@example.com"),
-    ):
-        username = random_email()
-        password = random_lower_string()
-        data = {"email": username, "password": password}
-        r = client.post(
-            f"{settings.API_V1_STR}/users/",
-            headers=superuser_token_headers,
-            json=data,
-        )
-        assert 200 <= r.status_code < 300
-        created_user = r.json()
-        user = crud.get_user_by_email(session=db, email=username)
-        assert user
-        assert user.email == created_user["email"]
-
-
-def test_get_existing_user_as_superuser(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-    user_id = user.id
-    r = client.get(
-        f"{settings.API_V1_STR}/users/{user_id}",
-        headers=superuser_token_headers,
+@pytest.mark.parametrize("method", ["get", "patch", "delete"])
+def test_admin_cannot_access_foreign_tenant_profile(
+    client, fixture_actors, issue_token, method
+):
+    url = f"/api/v1/users/{fixture_actors['foreign_admin']['id']}"
+    kwargs = {"json": {"full_name": "Forbidden"}} if method == "patch" else {}
+    response = getattr(client, method)(
+        url, headers=issue_token(fixture_actors["admin"]), **kwargs
     )
-    assert 200 <= r.status_code < 300
-    api_user = r.json()
-    existing_user = crud.get_user_by_email(session=db, email=username)
-    assert existing_user
-    assert existing_user.email == api_user["email"]
+    assert response.status_code == 404
 
 
-def test_get_non_existing_user_as_superuser(
-    client: TestClient, superuser_token_headers: dict[str, str]
-) -> None:
-    r = client.get(
-        f"{settings.API_V1_STR}/users/{uuid.uuid4()}",
-        headers=superuser_token_headers,
+def test_admin_list_is_selected_tenant_only(client, fixture_actors, issue_token):
+    response = client.get(
+        "/api/v1/users/", headers=issue_token(fixture_actors["admin"])
     )
-    assert r.status_code == 404
-    assert r.json() == {"detail": "User not found"}
-
-
-def test_get_existing_user_current_user(client: TestClient, db: Session) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-    user_id = user.id
-
-    login_data = {
-        "username": username,
-        "password": password,
+    assert response.status_code == 200
+    assert {user["tenant_id"] for user in response.json()["data"]} == {
+        fixture_actors["admin"]["tenant_id"]
     }
-    r = client.post(f"{settings.API_V1_STR}/login/access-token", data=login_data)
-    tokens = r.json()
-    a_token = tokens["access_token"]
-    headers = {"Authorization": f"Bearer {a_token}"}
+    assert fixture_actors["foreign_admin"]["id"] not in {
+        u["id"] for u in response.json()["data"]
+    }
 
-    r = client.get(
-        f"{settings.API_V1_STR}/users/{user_id}",
+
+@pytest.mark.parametrize(
+    "actor_name,overrides",
+    [
+        ("revoked", {}),
+        ("admin", {"org_id": "org_unmapped_fixture"}),
+        ("admin", {"org_id": "FOREIGN"}),
+        ("admin", {"sub": "user_unknown_fixture"}),
+        ("member", {"user_role": "admin"}),
+    ],
+)
+def test_unknown_revoked_or_confused_identity_denied(
+    client, fixture_actors, issue_token, actor_name, overrides
+):
+    if overrides.get("org_id") == "FOREIGN":
+        overrides = {"org_id": fixture_actors["foreign_admin"]["organization_id"]}
+    response = client.get(
+        "/api/v1/users/me", headers=issue_token(fixture_actors[actor_name], **overrides)
+    )
+    assert response.status_code == 403
+
+
+def test_email_never_autoprovisions_or_links_actor(client, fixture_actors, issue_token):
+    response = client.get(
+        "/api/v1/users/me",
+        headers=issue_token(
+            fixture_actors["admin"],
+            sub="user_unknown_fixture",
+            email=f"{fixture_actors['admin']['id']}@fixture.example.com",
+        ),
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("tenant_id", "foreign_fixture"),
+        ("identity_entity_id", str(uuid4())),
+        ("is_superuser", True),
+        ("password", "not-a-local-password"),
+    ],
+)
+def test_profile_attribution_and_global_role_are_not_mutable(
+    client, fixture_actors, issue_token, field, value
+):
+    response = client.patch(
+        "/api/v1/users/me",
+        headers=issue_token(fixture_actors["admin"]),
+        json={field: value},
+    )
+    assert response.status_code == 422
+
+
+def test_profile_admin_cannot_grant_membership_or_role(
+    client, fixture_actors, issue_token
+):
+    admin = fixture_actors["admin"]
+    response = client.patch(
+        f"/api/v1/users/{fixture_actors['member']['id']}",
+        headers=issue_token(admin),
+        json={"user_role": "admin"},
+    )
+    assert response.status_code == 422
+
+
+def test_admin_create_requires_existing_same_tenant_canonical_actor(
+    client, fixture_actors, issue_token
+):
+    headers = issue_token(fixture_actors["admin"])
+    unknown = client.post(
+        "/api/v1/users/",
         headers=headers,
+        json={
+            "email": "unknown@fixture.example.com",
+            "identity_entity_id": str(uuid4()),
+        },
     )
-    assert 200 <= r.status_code < 300
-    api_user = r.json()
-    existing_user = crud.get_user_by_email(session=db, email=username)
-    assert existing_user
-    assert existing_user.email == api_user["email"]
-
-
-def test_get_existing_user_permissions_error(
-    db: Session,
-    client: TestClient,
-    normal_user_token_headers: dict[str, str],
-) -> None:
-    user = create_random_user(db)
-
-    r = client.get(
-        f"{settings.API_V1_STR}/users/{user.id}",
-        headers=normal_user_token_headers,
+    assert unknown.status_code == 403
+    foreign = client.post(
+        "/api/v1/users/",
+        headers=headers,
+        json={
+            "email": "foreign@fixture.example.com",
+            "identity_entity_id": fixture_actors["foreign_admin"]["identity_entity_id"],
+        },
     )
-    assert r.status_code == 403
-    assert r.json() == {"detail": "The user doesn't have enough privileges"}
-
-
-def test_get_non_existing_user_permissions_error(
-    client: TestClient,
-    normal_user_token_headers: dict[str, str],
-) -> None:
-    user_id = uuid.uuid4()
-
-    r = client.get(
-        f"{settings.API_V1_STR}/users/{user_id}",
-        headers=normal_user_token_headers,
+    assert foreign.status_code == 403
+    revoked = client.post(
+        "/api/v1/users/",
+        headers=headers,
+        json={
+            "email": "revoked@fixture.example.com",
+            "identity_entity_id": fixture_actors["revoked"]["identity_entity_id"],
+        },
     )
-    assert r.status_code == 403
-    assert r.json() == {"detail": "The user doesn't have enough privileges"}
-
-
-def test_create_user_existing_username(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    username = random_email()
-    # username = email
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    crud.create_user(session=db, user_create=user_in)
-    data = {"email": username, "password": password}
-    r = client.post(
-        f"{settings.API_V1_STR}/users/",
-        headers=superuser_token_headers,
-        json=data,
-    )
-    created_user = r.json()
-    assert r.status_code == 400
-    assert "_id" not in created_user
-
-
-def test_create_user_by_normal_user(
-    client: TestClient, normal_user_token_headers: dict[str, str]
-) -> None:
-    username = random_email()
-    password = random_lower_string()
-    data = {"email": username, "password": password}
-    r = client.post(
-        f"{settings.API_V1_STR}/users/",
-        headers=normal_user_token_headers,
-        json=data,
-    )
-    assert r.status_code == 403
-
-
-def test_retrieve_users(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    crud.create_user(session=db, user_create=user_in)
-
-    username2 = random_email()
-    password2 = random_lower_string()
-    user_in2 = UserCreate(email=username2, password=password2)
-    crud.create_user(session=db, user_create=user_in2)
-
-    r = client.get(f"{settings.API_V1_STR}/users/", headers=superuser_token_headers)
-    all_users = r.json()
-
-    assert len(all_users["data"]) > 1
-    assert "count" in all_users
-    for item in all_users["data"]:
-        assert "email" in item
-
-
-def test_update_user_me(
-    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
-) -> None:
-    full_name = "Updated Name"
-    email = random_email()
-    data = {"full_name": full_name, "email": email}
-    r = client.patch(
-        f"{settings.API_V1_STR}/users/me",
-        headers=normal_user_token_headers,
-        json=data,
-    )
-    assert r.status_code == 200
-    updated_user = r.json()
-    assert updated_user["email"] == email
-    assert updated_user["full_name"] == full_name
-
-    user_query = select(User).where(User.email == email)
-    user_db = db.exec(user_query).first()
-    assert user_db
-    assert user_db.email == email
-    assert user_db.full_name == full_name
-
-
-def test_update_password_me(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    new_password = random_lower_string()
-    data = {
-        "current_password": settings.FIRST_SUPERUSER_PASSWORD,
-        "new_password": new_password,
-    }
-    r = client.patch(
-        f"{settings.API_V1_STR}/users/me/password",
-        headers=superuser_token_headers,
-        json=data,
-    )
-    assert r.status_code == 200
-    updated_user = r.json()
-    assert updated_user["message"] == "Password updated successfully"
-
-    user_query = select(User).where(User.email == settings.FIRST_SUPERUSER)
-    user_db = db.exec(user_query).first()
-    assert user_db
-    assert user_db.email == settings.FIRST_SUPERUSER
-    verified, _ = verify_password(new_password, user_db.hashed_password)
-    assert verified
-
-    # Revert to the old password to keep consistency in test
-    old_data = {
-        "current_password": new_password,
-        "new_password": settings.FIRST_SUPERUSER_PASSWORD,
-    }
-    r = client.patch(
-        f"{settings.API_V1_STR}/users/me/password",
-        headers=superuser_token_headers,
-        json=old_data,
-    )
-    db.refresh(user_db)
-
-    assert r.status_code == 200
-    verified, _ = verify_password(
-        settings.FIRST_SUPERUSER_PASSWORD, user_db.hashed_password
-    )
-    assert verified
-
-
-def test_update_password_me_incorrect_password(
-    client: TestClient, superuser_token_headers: dict[str, str]
-) -> None:
-    new_password = random_lower_string()
-    data = {"current_password": new_password, "new_password": new_password}
-    r = client.patch(
-        f"{settings.API_V1_STR}/users/me/password",
-        headers=superuser_token_headers,
-        json=data,
-    )
-    assert r.status_code == 400
-    updated_user = r.json()
-    assert updated_user["detail"] == "Incorrect password"
-
-
-def test_update_user_me_email_exists(
-    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
-) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-
-    data = {"email": user.email}
-    r = client.patch(
-        f"{settings.API_V1_STR}/users/me",
-        headers=normal_user_token_headers,
-        json=data,
-    )
-    assert r.status_code == 409
-    assert r.json()["detail"] == "User with this email already exists"
-
-
-def test_update_password_me_same_password_error(
-    client: TestClient, superuser_token_headers: dict[str, str]
-) -> None:
-    data = {
-        "current_password": settings.FIRST_SUPERUSER_PASSWORD,
-        "new_password": settings.FIRST_SUPERUSER_PASSWORD,
-    }
-    r = client.patch(
-        f"{settings.API_V1_STR}/users/me/password",
-        headers=superuser_token_headers,
-        json=data,
-    )
-    assert r.status_code == 400
-    updated_user = r.json()
+    assert revoked.status_code == 200
+    # A local profile does not grant or reactivate provider membership.
     assert (
-        updated_user["detail"] == "New password cannot be the same as the current one"
+        client.get(
+            "/api/v1/users/me", headers=issue_token(fixture_actors["revoked"])
+        ).status_code
+        == 403
     )
-
-
-def test_register_user(client: TestClient, db: Session) -> None:
-    username = random_email()
-    password = random_lower_string()
-    full_name = random_lower_string()
-    data = {"email": username, "password": password, "full_name": full_name}
-    r = client.post(
-        f"{settings.API_V1_STR}/users/signup",
-        json=data,
-    )
-    assert r.status_code == 200
-    created_user = r.json()
-    assert created_user["email"] == username
-    assert created_user["full_name"] == full_name
-
-    user_query = select(User).where(User.email == username)
-    user_db = db.exec(user_query).first()
-    assert user_db
-    assert user_db.email == username
-    assert user_db.full_name == full_name
-    verified, _ = verify_password(password, user_db.hashed_password)
-    assert verified
-
-
-def test_register_user_already_exists_error(client: TestClient) -> None:
-    password = random_lower_string()
-    full_name = random_lower_string()
-    data = {
-        "email": settings.FIRST_SUPERUSER,
-        "password": password,
-        "full_name": full_name,
-    }
-    r = client.post(
-        f"{settings.API_V1_STR}/users/signup",
-        json=data,
-    )
-    assert r.status_code == 400
-    assert r.json()["detail"] == "The user with this email already exists in the system"
-
-
-def test_update_user(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-
-    data = {"full_name": "Updated_full_name"}
-    r = client.patch(
-        f"{settings.API_V1_STR}/users/{user.id}",
-        headers=superuser_token_headers,
-        json=data,
-    )
-    assert r.status_code == 200
-    updated_user = r.json()
-
-    assert updated_user["full_name"] == "Updated_full_name"
-
-    user_query = select(User).where(User.email == username)
-    user_db = db.exec(user_query).first()
-    db.refresh(user_db)
-    assert user_db
-    assert user_db.full_name == "Updated_full_name"
-
-
-def test_update_user_not_exists(
-    client: TestClient, superuser_token_headers: dict[str, str]
-) -> None:
-    data = {"full_name": "Updated_full_name"}
-    r = client.patch(
-        f"{settings.API_V1_STR}/users/{uuid.uuid4()}",
-        headers=superuser_token_headers,
-        json=data,
-    )
-    assert r.status_code == 404
-    assert r.json()["detail"] == "The user with this id does not exist in the system"
-
-
-def test_update_user_email_exists(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-
-    username2 = random_email()
-    password2 = random_lower_string()
-    user_in2 = UserCreate(email=username2, password=password2)
-    user2 = crud.create_user(session=db, user_create=user_in2)
-
-    data = {"email": user2.email}
-    r = client.patch(
-        f"{settings.API_V1_STR}/users/{user.id}",
-        headers=superuser_token_headers,
-        json=data,
-    )
-    assert r.status_code == 409
-    assert r.json()["detail"] == "User with this email already exists"
-
-
-def test_delete_user_me(client: TestClient, db: Session) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-    user_id = user.id
-
-    login_data = {
-        "username": username,
-        "password": password,
-    }
-    r = client.post(f"{settings.API_V1_STR}/login/access-token", data=login_data)
-    tokens = r.json()
-    a_token = tokens["access_token"]
-    headers = {"Authorization": f"Bearer {a_token}"}
-
-    r = client.delete(
-        f"{settings.API_V1_STR}/users/me",
+    actor = fixture_actors["unprofiled"]
+    response = client.post(
+        "/api/v1/users/",
         headers=headers,
+        json={
+            "email": "new-profile@fixture.example.com",
+            "identity_entity_id": actor["identity_entity_id"],
+        },
     )
-    assert r.status_code == 200
-    deleted_user = r.json()
-    assert deleted_user["message"] == "User deleted successfully"
-    result = db.exec(select(User).where(User.id == user_id)).first()
-    assert result is None
-
-    user_query = select(User).where(User.id == user_id)
-    user_db = db.execute(user_query).first()
-    assert user_db is None
+    assert response.status_code == 200
+    assert response.json()["identity_entity_id"] == actor["identity_entity_id"]
+    assert response.json()["tenant_id"] == actor["tenant_id"]
+    assert response.json()["id"] != actor["identity_entity_id"]
+    me = client.get("/api/v1/users/me", headers=issue_token(actor))
+    assert me.status_code == 200
+    assert me.json()["id"] == response.json()["id"]
 
 
-def test_delete_user_me_as_superuser(
-    client: TestClient, superuser_token_headers: dict[str, str]
-) -> None:
-    r = client.delete(
-        f"{settings.API_V1_STR}/users/me",
-        headers=superuser_token_headers,
+def test_ordinary_member_cannot_administer_accounts(
+    client, fixture_actors, issue_token
+):
+    response = client.get(
+        "/api/v1/users/", headers=issue_token(fixture_actors["member"])
     )
-    assert r.status_code == 403
-    response = r.json()
-    assert response["detail"] == "Super users are not allowed to delete themselves"
+    assert response.status_code == 403
 
 
-def test_delete_user_super_user(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
-    user_id = user.id
-    r = client.delete(
-        f"{settings.API_V1_STR}/users/{user_id}",
-        headers=superuser_token_headers,
+def test_admin_without_business_permission_cannot_administer_accounts(
+    client, fixture_actors, issue_token
+):
+    response = client.get(
+        "/api/v1/users/", headers=issue_token(fixture_actors["admin"], permissions=[])
     )
-    assert r.status_code == 200
-    deleted_user = r.json()
-    assert deleted_user["message"] == "User deleted successfully"
-    result = db.exec(select(User).where(User.id == user_id)).first()
-    assert result is None
+    assert response.status_code == 403
 
 
-def test_delete_user_not_found(
-    client: TestClient, superuser_token_headers: dict[str, str]
-) -> None:
-    r = client.delete(
-        f"{settings.API_V1_STR}/users/{uuid.uuid4()}",
-        headers=superuser_token_headers,
+def test_self_profile_roundtrip_survives_commit(client, fixture_actors, issue_token):
+    headers = issue_token(fixture_actors["member"])
+    changed = client.patch(
+        "/api/v1/users/me",
+        headers=headers,
+        json={"full_name": "Changed fixture profile"},
     )
-    assert r.status_code == 404
-    assert r.json()["detail"] == "User not found"
+    assert changed.status_code == 200
+    response = client.get("/api/v1/users/me", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["full_name"] == "Changed fixture profile"
 
 
-def test_delete_user_current_super_user_error(
-    client: TestClient, superuser_token_headers: dict[str, str], db: Session
-) -> None:
-    super_user = crud.get_user_by_email(session=db, email=settings.FIRST_SUPERUSER)
-    assert super_user
-    user_id = super_user.id
+def test_caller_tenant_header_does_not_select_identity(
+    client, fixture_actors, issue_token
+):
+    actor = fixture_actors["admin"]
+    headers = issue_token(actor) | {
+        "X-Tenant-ID": fixture_actors["foreign_admin"]["tenant_id"]
+    }
+    response = client.get("/api/v1/users/me", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["tenant_id"] == actor["tenant_id"]
+    assert response.json()["id"] == actor["id"]
 
-    r = client.delete(
-        f"{settings.API_V1_STR}/users/{user_id}",
-        headers=superuser_token_headers,
+
+def test_deactivated_local_actor_cannot_authenticate(
+    client, fixture_actors, issue_token
+):
+    actor = fixture_actors["member"]
+    response = client.patch(
+        f"/api/v1/users/{actor['id']}",
+        headers=issue_token(fixture_actors["admin"]),
+        json={"is_active": False},
     )
-    assert r.status_code == 403
-    assert r.json()["detail"] == "Super users are not allowed to delete themselves"
+    assert response.status_code == 200
+    assert client.get("/api/v1/users/me", headers=issue_token(actor)).status_code == 403
 
 
-def test_delete_user_without_privileges(
-    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
-) -> None:
-    username = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
-    user = crud.create_user(session=db, user_create=user_in)
+@pytest.mark.parametrize("operation", ["self_update", "admin_update", "create"])
+def test_same_tenant_profile_email_collision_returns_existing_conflict(
+    client, fixture_actors, issue_token, operation
+):
+    admin_headers = issue_token(fixture_actors["admin"])
+    member_headers = issue_token(fixture_actors["member"])
+    admin = client.get("/api/v1/users/me", headers=admin_headers).json()
+    member_before = client.get("/api/v1/users/me", headers=member_headers).json()
+    if operation == "self_update":
+        # RLS deliberately hides the administrator's profile from this member.
+        response = client.patch(
+            "/api/v1/users/me", headers=member_headers, json={"email": admin["email"]}
+        )
+    elif operation == "admin_update":
+        response = client.patch(
+            f"/api/v1/users/{fixture_actors['member']['id']}",
+            headers=admin_headers,
+            json={"email": admin["email"]},
+        )
+    else:
+        response = client.post(
+            "/api/v1/users/",
+            headers=admin_headers,
+            json={
+                "email": admin["email"],
+                "identity_entity_id": fixture_actors["unprofiled"][
+                    "identity_entity_id"
+                ],
+            },
+        )
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "User with this email already exists in this tenant"
+    }
+    # The failed native write must roll back, leaving the actor and pooled
+    # connection usable without widening member profile visibility.
+    member_after = client.get("/api/v1/users/me", headers=member_headers)
+    assert member_after.status_code == 200
+    assert member_after.json()["email"] == member_before["email"]
 
-    r = client.delete(
-        f"{settings.API_V1_STR}/users/{user.id}",
-        headers=normal_user_token_headers,
+
+@pytest.mark.parametrize("operation", ["self_update", "admin_update", "create"])
+def test_profile_email_uniqueness_allows_existing_foreign_tenant_email(
+    client, fixture_actors, issue_token, operation
+):
+    admin_headers = issue_token(fixture_actors["admin"])
+    foreign = client.get(
+        "/api/v1/users/me", headers=issue_token(fixture_actors["foreign_admin"])
+    ).json()
+    if operation == "self_update":
+        response = client.patch(
+            "/api/v1/users/me",
+            headers=issue_token(fixture_actors["member"]),
+            json={"email": foreign["email"]},
+        )
+    elif operation == "admin_update":
+        response = client.patch(
+            f"/api/v1/users/{fixture_actors['member']['id']}",
+            headers=admin_headers,
+            json={"email": foreign["email"]},
+        )
+    else:
+        response = client.post(
+            "/api/v1/users/",
+            headers=admin_headers,
+            json={
+                "email": foreign["email"],
+                "identity_entity_id": fixture_actors["unprofiled"][
+                    "identity_entity_id"
+                ],
+            },
+        )
+    assert response.status_code == 200
+    assert response.json()["email"] == foreign["email"]
+    assert response.json()["tenant_id"] == fixture_actors["admin"]["tenant_id"]
+    assert response.json()["tenant_id"] != foreign["tenant_id"]
+
+
+def test_admin_self_deactivation_returns_committed_state(
+    client, fixture_actors, issue_token
+):
+    actor = fixture_actors["admin"]
+    headers = issue_token(actor)
+    response = client.patch(
+        f"/api/v1/users/{actor['id']}",
+        headers=headers,
+        json={"is_active": False},
     )
-    assert r.status_code == 403
-    assert r.json()["detail"] == "The user doesn't have enough privileges"
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+    assert client.get("/api/v1/users/me", headers=headers).status_code == 403
+
+
+def test_concurrent_canonical_profile_creation_returns_existing_conflict(
+    client, fixture_actors, issue_token, runtime_engine, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from sqlmodel import create_engine
+
+    from app import crud
+    from app.api import deps
+
+    engine = create_engine(runtime_engine.url, pool_size=2, max_overflow=0)
+    monkeypatch.setattr(deps, "engine", engine)
+    headers = issue_token(fixture_actors["admin"])
+    original_lookup = crud.get_user_by_email
+    both_prechecks_complete = Barrier(2)
+
+    def synchronized_lookup(**kwargs):
+        result = original_lookup(**kwargs)
+        both_prechecks_complete.wait(timeout=30)
+        return result
+
+    monkeypatch.setattr(crud, "get_user_by_email", synchronized_lookup)
+
+    def create_profile(email):
+        return client.post(
+            "/api/v1/users/",
+            headers=headers,
+            json={
+                "email": email,
+                "identity_entity_id": fixture_actors["unprofiled"][
+                    "identity_entity_id"
+                ],
+            },
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(
+                executor.map(
+                    create_profile,
+                    ["first@fixture.example.com", "second@fixture.example.com"],
+                )
+            )
+        assert sorted(response.status_code for response in responses) == [200, 409]
+        conflict = next(
+            response for response in responses if response.status_code == 409
+        )
+        assert conflict.json() == {"detail": "Local actor profile already exists"}
+    finally:
+        engine.dispose()

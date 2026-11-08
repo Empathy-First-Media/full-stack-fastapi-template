@@ -1,78 +1,78 @@
 # FastAPI Project - Deployment
 
-Deploy the project to [FastAPI Cloud](https://fastapicloud.com) with the included GitHub Actions workflow.
+Deployment is deliberately gated. Do not deploy until the reviewed API namespace,
+canonical identity mappings, non-bypass runtime role, isolated tests, recovery and
+real WorkOS application-settings readback have passed. Source code and fixtures
+are not production admission.
 
-## Create the FastAPI Cloud Application
+## Configure the application
 
-Create an application in FastAPI Cloud and set its [Application Directory](https://fastapicloud.com/docs/builds-and-deployments/application-directory/) to `backend`.
+For FastAPI Cloud, use `backend` as the application directory. Bind the existing
+approved product database, not a newly created template database. A provider
+integration's automatically supplied administrative URL is not evidence of a
+safe runtime role.
 
-Connect a PostgreSQL database using the [Neon](https://fastapicloud.com/docs/integrations/neon-integration/) or [Supabase](https://fastapicloud.com/docs/integrations/supabase-integration/) integration. Both integrations configure a `DATABASE_URL` secret automatically. You can also configure `DATABASE_URL` manually for another PostgreSQL provider.
+Required non-secret settings:
 
-## Configure the Application
+- `PROJECT_NAME`
+- `FRONTEND_HOST`: exact HTTPS browser origin/redirect destination
+- `WORKOS_CLIENT_ID`: the approved application
+- `WORKOS_ISSUER`: exact trusted HTTPS issuer
+- `WORKOS_JWKS_URL`: explicit trusted HTTPS signing JWKS
+- `WORKOS_API_HOSTNAME`: approved production custom Authentication API hostname
 
-### Environment Variables
+Required secret: `DATABASE_URL`, using the dedicated non-superuser,
+`NOBYPASSRLS` runtime login. The resource server needs no WorkOS API key and
+contains no local-password/global-superuser seed. Optional SMTP/Sentry settings
+are described in [backend configuration](backend/README.md).
 
-Add these required [environment variables](https://fastapicloud.com/docs/builds-and-deployments/environment-variables/) to the FastAPI Cloud application:
+Register and read back the effective redirect URI, allowed browser origin,
+sign-out default and SDK-backed `/login` Initiate login URI on the selected
+WorkOS application. Verify its custom domain and TLS. Browser AuthKit React owns
+login, refresh, logout and organization selection; it uses public
+`GET /api/v1/auth/config`, not build-time secrets.
 
-* `PROJECT_NAME`: The name of the project, used in the API documentation and emails.
-* `FIRST_SUPERUSER`: The email address of the first superuser.
-* `FRONTEND_HOST`: The public URL of the application, such as the generated `https://your-app.fastapicloud.dev` URL or a custom domain.
+## Prepare the API namespace
 
-To enable emails, add these optional environment variables with values from your email provider:
+Provision canonical product schemas/identities through their existing owner and
+`api` through the reviewed schema owner. Preserve canonical tenant TEXT IDs and
+local actor UUIDs. Do not run the legacy public migration history, create tables
+at application startup, or seed identities from email.
 
-* `SMTP_HOST`
-* `SMTP_USER`
-* `EMAILS_FROM_EMAIL`
+Supply `API_MIGRATION_DATABASE_URL` only to the reviewed migration job. It must
+use an authority distinct from the runtime login. From `backend/`:
 
-To enable Sentry, configure `SENTRY_DSN`.
-
-### Secrets
-
-Add these required values and mark them as secrets:
-
-* `SECRET_KEY`: A secret key used to sign security tokens.
-* `FIRST_SUPERUSER_PASSWORD`: The password of the first superuser.
-* `DATABASE_URL`: The PostgreSQL connection URL, configured automatically when using a database integration.
-
-To enable emails with an authenticated provider, add `SMTP_PASSWORD` as a secret.
-
-You can generate secure values for `SECRET_KEY` and `FIRST_SUPERUSER_PASSWORD` with:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+```console
+uv run alembic -c alembic-api.ini upgrade api@head
 ```
 
-## Configure Continuous Deployment
+`scripts/prestart.sh` invokes this exact branch and no seed. Without a reviewed
+API revision and owner-provisioned prerequisites it refuses application.
 
-The included `.github/workflows/deploy.yml` workflow builds the frontend, prepares the database, and deploys the application whenever changes are pushed to `master`. You can also run it manually from the **Actions** tab.
+## Continuous deployment admission
 
-Log in to FastAPI Cloud and configure the [deploy token](https://fastapicloud.com/docs/advanced-features/deploy-tokens/) and application ID as GitHub repository secrets:
+Both deployment workflows are manual-only and select the `production` GitHub
+environment. Its required reviewers and environment protection remain UNVERIFIED
+until the native GitHub owner reads them back. An environment name alone is not
+protection, and a boolean approval flag cannot establish recovery or tenant
+conformance. Do not trigger deployment before those protections and every
+production prerequisite are verified.
 
-```bash
-uv run fastapi login
-uv run fastapi cloud setup-ci --secrets-only --app-id <your-app-id>
-```
+For `.github/workflows/deploy.yml`, configure the non-secret settings above on the
+actual FastAPI Cloud application and matching GitHub repository variables.
+Configure `DATABASE_URL`, `API_MIGRATION_DATABASE_URL`, `FASTAPI_CLOUD_TOKEN` and
+`FASTAPI_CLOUD_APP_ID` as scoped GitHub secrets. Runtime deployment must not retain
+the migration credential. Do not place keys, DSNs or tokens in source or logs.
 
-If the GitHub CLI is installed and authenticated, the command configures `FASTAPI_CLOUD_TOKEN` and `FASTAPI_CLOUD_APP_ID` automatically. Otherwise, it prints the values so you can add them in your repository under **Settings** > **Secrets and variables** > **Actions**.
+The admitted workflow builds the frontend, runs only the API migration branch,
+then invokes the native FastAPI deployment command. This documentation does not
+configure credentials, provider settings, schema or a deployment.
 
-The workflow runs database migrations and creates the first superuser before deploying. In the repository's **Settings** > **Secrets and variables** > **Actions** page, add these repository variables:
-
-* `PROJECT_NAME`
-* `FIRST_SUPERUSER`
-
-Add these repository secrets:
-
-* `DATABASE_URL`
-* `SECRET_KEY`
-* `FIRST_SUPERUSER_PASSWORD`
-
-Use the same values configured in FastAPI Cloud. For `DATABASE_URL`, use the connection URL from your database provider. The database must be reachable from GitHub-hosted runners so the preparation step can connect to it.
-
-The deployment workflow performs these steps:
-
-1. Installs and builds the frontend into `backend/app/frontend`.
-2. Runs `backend/scripts/prestart.sh` to apply database migrations and create the first superuser.
-3. Deploys the project with `uv run fastapi deploy`.
+Before admission, run the [isolated SQL/token/browser consumers](backend/README.md),
+regenerate the native OpenAPI client, and establish real direct/gateway
+same-tenant CRUD and cross-tenant denial. Verify durable readback, sign-in,
+sign-out, externally initiated login, revoked memberships and pooled transaction
+reuse. Keep the application inactive until every required production gate passes.
 
 ## URLs
 

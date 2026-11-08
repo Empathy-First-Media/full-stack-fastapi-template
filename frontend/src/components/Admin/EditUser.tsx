@@ -31,23 +31,11 @@ import { LoadingButton } from "@/components/ui/loading-button"
 import useCustomToast from "@/hooks/useCustomToast"
 import { handleError } from "@/utils"
 
-const formSchema = z
-  .object({
-    email: z.email({ message: "Invalid email address" }),
-    full_name: z.string().optional(),
-    password: z
-      .string()
-      .min(8, { message: "Password must be at least 8 characters" })
-      .optional()
-      .or(z.literal("")),
-    confirm_password: z.string().optional(),
-    is_superuser: z.boolean().optional(),
-    is_active: z.boolean().optional(),
-  })
-  .refine((data) => !data.password || data.password === data.confirm_password, {
-    message: "The passwords don't match",
-    path: ["confirm_password"],
-  })
+const formSchema = z.object({
+  email: z.email({ message: "Invalid email address" }),
+  full_name: z.string().optional(),
+  is_active: z.boolean().optional(),
+})
 
 type FormData = z.infer<typeof formSchema>
 
@@ -68,7 +56,6 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
     defaultValues: {
       email: user.email,
       full_name: user.full_name ?? undefined,
-      is_superuser: user.is_superuser,
       is_active: user.is_active,
     },
   })
@@ -87,14 +74,7 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
     },
   })
 
-  const onSubmit = (data: FormData) => {
-    // exclude confirm_password from submission data and remove password if empty
-    const { confirm_password: _, ...submitData } = data
-    if (!submitData.password) {
-      delete submitData.password
-    }
-    mutation.mutate(submitData)
-  }
+  const onSubmit = (data: FormData) => mutation.mutate(data)
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -146,58 +126,6 @@ const EditUser = ({ user, onSuccess }: EditUserProps) => {
                       <Input placeholder="Full name" type="text" {...field} />
                     </FormControl>
                     <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Set Password</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Password"
-                        type="password"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="confirm_password"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Confirm Password</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Password"
-                        type="password"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="is_superuser"
-                render={({ field }) => (
-                  <FormItem className="flex items-center gap-3 space-y-0">
-                    <FormControl>
-                      <Checkbox
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                    <FormLabel className="font-normal">Is superuser?</FormLabel>
                   </FormItem>
                 )}
               />

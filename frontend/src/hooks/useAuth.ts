@@ -1,70 +1,22 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { useQuery } from "@tanstack/react-query"
+import { useAuth as useAuthKit } from "@workos-inc/authkit-react"
+import { UsersService } from "@/client"
+import { useSessionControl } from "@/components/AuthProvider"
 
-import {
-  type Body_login_login_access_token as AccessToken,
-  LoginService,
-  type UserPublic,
-  type UserRegister,
-  UsersService,
-} from "@/client"
-import { handleError } from "@/utils"
-import useCustomToast from "./useCustomToast"
-
-const isLoggedIn = () => {
-  return localStorage.getItem("access_token") !== null
-}
-
-const useAuth = () => {
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const { showErrorToast } = useCustomToast()
-
-  const { data: user } = useQuery<UserPublic | null, Error>({
-    queryKey: ["currentUser"],
-    queryFn: async () => (await UsersService.readUserMe()).data,
-    enabled: isLoggedIn(),
+export default function useAuth() {
+  const auth = useAuthKit()
+  const { logout } = useSessionControl()
+  const profile = useQuery({
+    queryKey: ["currentUser", auth.user?.id, auth.organizationId],
+    queryFn: async ({ signal }) =>
+      (await UsersService.readUserMe({ signal })).data,
+    enabled: Boolean(auth.user && auth.organizationId) && !auth.isLoading,
+    retry: false,
   })
-
-  const signUpMutation = useMutation({
-    mutationFn: (data: UserRegister) =>
-      UsersService.registerUser({ body: data }),
-    onSuccess: () => {
-      navigate({ to: "/login" })
-    },
-    onError: handleError.bind(showErrorToast),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["users"] })
-    },
-  })
-
-  const login = async (data: AccessToken) => {
-    const response = await LoginService.loginAccessToken({
-      body: data,
-    })
-    localStorage.setItem("access_token", response.data.access_token)
-  }
-
-  const loginMutation = useMutation({
-    mutationFn: login,
-    onSuccess: () => {
-      navigate({ to: "/" })
-    },
-    onError: handleError.bind(showErrorToast),
-  })
-
-  const logout = () => {
-    localStorage.removeItem("access_token")
-    navigate({ to: "/login" })
-  }
-
   return {
-    signUpMutation,
-    loginMutation,
+    ...auth,
+    user: profile.data,
+    profile,
     logout,
-    user,
   }
 }
-
-export { isLoggedIn }
-export default useAuth

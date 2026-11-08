@@ -1,117 +1,53 @@
-import { expect, type Page, test } from "@playwright/test"
-import { firstSuperuser, firstSuperuserPassword } from "./config.ts"
-import { randomPassword } from "./utils/random.ts"
+import { expect, test } from "@playwright/test"
 
-test.use({ storageState: { cookies: [], origins: [] } })
-
-const fillForm = async (page: Page, email: string, password: string) => {
-  await page.getByTestId("email-input").fill(email)
-  await page.getByTestId("password-input").fill(password)
-}
-
-const verifyInput = async (page: Page, testId: string) => {
-  const input = page.getByTestId(testId)
-  await expect(input).toBeVisible()
-  await expect(input).toHaveText("")
-  await expect(input).toBeEditable()
-}
-
-test("Inputs are visible, empty and editable", async ({ page }) => {
-  await page.goto("/login")
-
-  await verifyInput(page, "email-input")
-  await verifyInput(page, "password-input")
+test("missing public configuration fails closed", async ({ page }) => {
+  await page.route("**/api/v1/auth/config", (route) =>
+    route.fulfill({ status: 503, json: {} }),
+  )
+  await page.goto("/items")
+  await expect(page.getByRole("alert")).toContainText(
+    "Sign-in configuration unavailable",
+  )
+  await expect(page.getByRole("button", { name: "Add Item" })).toHaveCount(0)
 })
 
-test("Log In button is visible", async ({ page }) => {
-  await page.goto("/login")
-
-  await expect(page.getByRole("button", { name: "Log In" })).toBeVisible()
-})
-
-test("Forgot Password link is visible", async ({ page }) => {
-  await page.goto("/login")
-
-  await expect(
-    page.getByRole("link", { name: "Forgot your password?" }),
-  ).toBeVisible()
-})
-
-test("Log in with valid email and password ", async ({ page }) => {
-  await page.goto("/login")
-
-  await fillForm(page, firstSuperuser, firstSuperuserPassword)
-  await page.getByRole("button", { name: "Log In" }).click()
-
-  await page.waitForURL("/")
-
-  await expect(
-    page.getByText("Welcome back, nice to see you again!"),
-  ).toBeVisible()
-})
-
-test("Log in with invalid email", async ({ page }) => {
-  await page.goto("/login")
-
-  await fillForm(page, "invalidemail", firstSuperuserPassword)
-  await page.getByRole("button", { name: "Log In" }).click()
-
-  await expect(page.getByText("Invalid email address")).toBeVisible()
-})
-
-test("Log in with invalid password", async ({ page }) => {
-  const password = randomPassword()
-
-  await page.goto("/login")
-  await fillForm(page, firstSuperuser, password)
-  await page.getByRole("button", { name: "Log In" }).click()
-
-  await expect(page.getByText("Incorrect email or password")).toBeVisible()
-})
-
-test("Successful log out", async ({ page }) => {
-  await page.goto("/login")
-
-  await fillForm(page, firstSuperuser, firstSuperuserPassword)
-  await page.getByRole("button", { name: "Log In" }).click()
-
-  await page.waitForURL("/")
-
-  await expect(
-    page.getByText("Welcome back, nice to see you again!"),
-  ).toBeVisible()
-
-  await page.getByTestId("user-menu").click()
-  await page.getByRole("menuitem", { name: "Log out" }).click()
-  await page.waitForURL("/login")
-})
-
-test("Logged-out user cannot access protected routes", async ({ page }) => {
-  await page.goto("/login")
-
-  await fillForm(page, firstSuperuser, firstSuperuserPassword)
-  await page.getByRole("button", { name: "Log In" }).click()
-
-  await page.waitForURL("/")
-
-  await expect(
-    page.getByText("Welcome back, nice to see you again!"),
-  ).toBeVisible()
-
-  await page.getByTestId("user-menu").click()
-  await page.getByRole("menuitem", { name: "Log out" }).click()
-  await page.waitForURL("/login")
-
-  await page.goto("/settings")
-  await page.waitForURL("/login")
-})
-
-test("Redirects to /login when token is wrong", async ({ page }) => {
-  await page.goto("/settings")
-  await page.evaluate(() => {
-    localStorage.setItem("access_token", "invalid_token")
-  })
-  await page.goto("/settings")
-  await page.waitForURL("/login")
-  await expect(page).toHaveURL("/login")
+test("external login preserves invitation and reset details through the official SDK (fixture)", async ({
+  page,
+  baseURL,
+}) => {
+  await page.route("**/api/v1/auth/config", (route) =>
+    route.fulfill({
+      json: {
+        client_id: "client_fixture",
+        api_hostname: "auth.fixture.example",
+        redirect_uri: baseURL,
+      },
+    }),
+  )
+  await page.route(
+    "https://auth.fixture.example/user_management/authorize**",
+    (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "Fixture AuthKit destination",
+      }),
+  )
+  await page.goto(
+    "/login?invitation_token=invite_fixture&password_reset_token=reset_fixture&organization_id=org_fixture&login_hint=fixture%40example.test",
+  )
+  await page.waitForURL(
+    "https://auth.fixture.example/user_management/authorize**",
+  )
+  const destination = new URL(page.url())
+  expect(destination.searchParams.get("invitation_token")).toBe(
+    "invite_fixture",
+  )
+  expect(destination.searchParams.get("password_reset_token")).toBe(
+    "reset_fixture",
+  )
+  expect(destination.searchParams.get("organization_id")).toBe("org_fixture")
+  expect(destination.searchParams.get("login_hint")).toBe(
+    "fixture@example.test",
+  )
+  expect(destination.searchParams.get("code_challenge")).toBeTruthy()
 })

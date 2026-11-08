@@ -1,57 +1,65 @@
 from collections.abc import Generator
 from typing import Annotated
 
-import jwt
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from jwt.exceptions import InvalidTokenError
-from pydantic import ValidationError
-from sqlmodel import Session
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt import InvalidTokenError, PyJWKClientError
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.core import security
-from app.core.config import settings
+from app.core.auth import Principal, VerifiedSession, resolve_principal
 from app.core.db import engine
-from app.models import TokenPayload, User
+from app.core.security import VerifiedAccessToken, get_token_verifier
 
-reusable_oauth2 = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_STR}/login/access-token"
-)
+bearer = HTTPBearer(auto_error=False)
 
 
-def get_db() -> Generator[Session]:
-    with Session(engine) as session:
-        yield session
-
-
-SessionDep = Annotated[Session, Depends(get_db)]
-TokenDep = Annotated[str, Depends(reusable_oauth2)]
-
-
-def get_current_user(session: SessionDep, token: TokenDep) -> User:
+def get_verified_token(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+) -> VerifiedAccessToken:
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Bearer token required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     try:
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
-        )
-        token_data = TokenPayload(**payload)
-    except InvalidTokenError, ValidationError:
+        return get_token_verifier().verify(credentials.credentials)
+    except PyJWKClientError:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Could not validate credentials",
+            status_code=401,
+            detail="Unable to verify access token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    user = session.get(User, token_data.sub)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if not user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return user
-
-
-CurrentUser = Annotated[User, Depends(get_current_user)]
-
-
-def get_current_active_superuser(current_user: CurrentUser) -> User:
-    if not current_user.is_superuser:
+    except InvalidTokenError, ValueError, TypeError:
         raise HTTPException(
-            status_code=403, detail="The user doesn't have enough privileges"
+            status_code=401,
+            detail="Invalid access token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    return current_user
+
+
+VerifiedTokenDep = Annotated[VerifiedAccessToken, Depends(get_verified_token)]
+
+
+def get_db(token: VerifiedTokenDep) -> Generator[VerifiedSession]:
+    with VerifiedSession(engine, info={"verified_token": token}) as session:
+        try:
+            yield session
+        finally:
+            try:
+                session.rollback()
+            finally:
+                session.info.clear()
+
+
+SessionDep = Annotated[VerifiedSession, Depends(get_db)]
+
+
+def get_current_principal(session: SessionDep, token: VerifiedTokenDep) -> Principal:
+    try:
+        return resolve_principal(session, token)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Identity data unavailable")
+
+
+CurrentPrincipal = Annotated[Principal, Depends(get_current_principal)]

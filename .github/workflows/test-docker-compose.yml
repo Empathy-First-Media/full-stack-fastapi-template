@@ -9,10 +9,18 @@ permissions:
   contents: read
 
 jobs:
-
   test-docker-compose:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # Public-config/UI smoke fixture only; SQL/RLS runs in Test Backend.
+      PROJECT_NAME: API container fixture
+      FRONTEND_HOST: http://localhost:8000
+      WORKOS_CLIENT_ID: client_fixture
+      WORKOS_ISSUER: https://auth.fixture.test/
+      WORKOS_JWKS_URL: https://auth.fixture.test/sso/jwks/client_fixture
+      WORKOS_API_HOSTNAME: auth.fixture.test
+      DATABASE_URL: postgresql+psycopg://fixture:fixture@localhost/api_test_unconfigured
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -20,10 +28,9 @@ jobs:
           persist-credentials: false
       - run: docker compose build
       - run: docker compose down -v --remove-orphans
-      - run: docker compose run --rm backend bash scripts/prestart.sh
-      - run: docker compose up -d --wait backend adminer
-      - name: Test backend is up
-        run: curl http://localhost:8000/api/v1/utils/health-check
+      - run: docker compose up -d --wait backend
+      - name: Test public configuration fixture
+        run: curl --fail http://localhost:8000/api/v1/auth/config
       - name: Test frontend is up
         run: curl http://localhost:8000
       - run: docker compose down -v --remove-orphans

@@ -1,5 +1,4 @@
 services:
-
   proxy:
     image: traefik:v3.7
     volumes:
@@ -17,55 +16,30 @@ services:
       # Enable the Traefik log, for configurations and errors
       - --log
 
-  db:
-    image: postgres:18
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d app"]
-      interval: 10s
-      retries: 5
-      start_period: 30s
-      timeout: 10s
-    volumes:
-      - app-db-data:/var/lib/postgresql
-    environment:
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Variable not set}
-      - POSTGRES_DB=app
-
-  adminer:
-    image: adminer
-    depends_on:
-      - db
-    environment:
-      - ADMINER_DESIGN=pepa-linha-dark
-    labels:
-      # Enable Traefik for this service
-      - traefik.enable=true
-      # Route HTTP traffic for the Adminer subdomain
-      - traefik.http.routers.adminer-http.rule=Host(`adminer.${DOMAIN:-localhost}`)
-      - traefik.http.routers.adminer-http.entrypoints=http
-      # Define the port inside of the Docker service to use
-      - traefik.http.services.adminer.loadbalancer.server.port=8080
-
   backend:
     image: backend:latest
-    depends_on:
-      db:
-        condition: service_healthy
-        restart: true
     environment:
       PROJECT_NAME: ${PROJECT_NAME:?Variable not set}
-      SECRET_KEY: ${SECRET_KEY:?Variable not set}
-      FIRST_SUPERUSER: ${FIRST_SUPERUSER:?Variable not set}
-      FIRST_SUPERUSER_PASSWORD: ${FIRST_SUPERUSER_PASSWORD:?Variable not set}
-      SMTP_HOST: ${SMTP_HOST}
+      FRONTEND_HOST: ${FRONTEND_HOST:?Variable not set}
+      WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:?Variable not set}
+      WORKOS_ISSUER: ${WORKOS_ISSUER:?Variable not set}
+      WORKOS_JWKS_URL: ${WORKOS_JWKS_URL:?Variable not set}
+      WORKOS_API_HOSTNAME: ${WORKOS_API_HOSTNAME:?Variable not set}
+      SMTP_HOST: ${SMTP_HOST:-}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      EMAILS_FROM_EMAIL: ${EMAILS_FROM_EMAIL}
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?Variable not set}@db:5432/app
+      EMAILS_FROM_EMAIL: ${EMAILS_FROM_EMAIL:-}
+      DATABASE_URL: ${DATABASE_URL:?Explicit non-superuser NOBYPASSRLS runtime URL required}
       SENTRY_DSN: ${SENTRY_DSN:-}
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/utils/health-check/"]
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:8000/api/v1/utils/health-check/",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -84,5 +58,10 @@ services:
       - traefik.http.routers.backend-http.rule=Host(`${DOMAIN:-localhost}`)
       - traefik.http.routers.backend-http.entrypoints=http
 
-volumes:
-  app-db-data:
+  migrate:
+    image: backend:latest
+    profiles: ["maintenance"]
+    command: ["bash", "scripts/prestart.sh"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Runtime URL required to verify distinct authorities}
+      API_MIGRATION_DATABASE_URL: ${API_MIGRATION_DATABASE_URL:-}

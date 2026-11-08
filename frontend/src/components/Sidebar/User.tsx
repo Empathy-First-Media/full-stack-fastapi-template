@@ -1,6 +1,7 @@
 import { Link as RouterLink } from "@tanstack/react-router"
 import { ChevronsUpDown, LogOut, Settings } from "lucide-react"
 
+import type { UserPublic } from "@/client"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -40,7 +41,7 @@ function UserInfo({ fullName, email }: UserInfoProps) {
   )
 }
 
-export function User({ user }: { user: any }) {
+export function User({ user }: { user: UserPublic | undefined }) {
   const { logout } = useAuth()
   const { isMobile, setOpenMobile } = useSidebar()
 
@@ -65,7 +66,10 @@ export function User({ user }: { user: any }) {
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               data-testid="user-menu"
             >
-              <UserInfo fullName={user?.full_name} email={user?.email} />
+              <UserInfo
+                fullName={user.full_name ?? undefined}
+                email={user.email}
+              />
               <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
@@ -76,7 +80,10 @@ export function User({ user }: { user: any }) {
             sideOffset={4}
           >
             <DropdownMenuLabel className="p-0 font-normal">
-              <UserInfo fullName={user?.full_name} email={user?.email} />
+              <UserInfo
+                fullName={user.full_name ?? undefined}
+                email={user.email}
+              />
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <RouterLink to="/settings" onClick={handleMenuClick}>

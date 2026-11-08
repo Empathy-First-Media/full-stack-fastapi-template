@@ -20,7 +20,11 @@ export const UserActionsMenu = ({ user }: UserActionsMenuProps) => {
   const [open, setOpen] = useState(false)
   const { user: currentUser } = useAuth()
 
-  if (user.id === currentUser?.id) {
+  if (
+    !currentUser?.is_tenant_admin ||
+    !currentUser.permissions.includes("org:projects:write") ||
+    user.id === currentUser.id
+  ) {
     return null
   }
 

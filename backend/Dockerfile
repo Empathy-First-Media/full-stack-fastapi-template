@@ -7,7 +7,7 @@ COPY frontend/package.json /app/frontend/
 
 WORKDIR /app/frontend
 
-RUN bun install
+RUN bun install --frozen-lockfile
 
 COPY ./frontend /app/frontend
 
@@ -43,11 +43,11 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-workspace --package app
+    uv sync --frozen --no-dev --no-install-workspace --package app
 
 COPY ./backend/scripts /app/backend/scripts
 
-COPY ./backend/pyproject.toml ./backend/alembic.ini /app/backend/
+COPY ./backend/pyproject.toml ./backend/alembic.ini ./backend/alembic-api.ini /app/backend/
 
 COPY ./backend/app /app/backend/app
 
@@ -58,7 +58,7 @@ COPY --from=frontend-build /app/backend/app/frontend /app/backend/app/frontend
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --package app
+    uv sync --frozen --no-dev --package app
 
 WORKDIR /app/backend/
 

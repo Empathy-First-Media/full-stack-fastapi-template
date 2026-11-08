@@ -1,11 +1,6 @@
 name: Deploy
 
 on:
-  push:
-    branches:
-      - master
-    paths-ignore:
-      - release-notes.md
   workflow_dispatch:
 
 permissions:
@@ -17,6 +12,16 @@ jobs:
     if: github.repository != 'fastapi/full-stack-fastapi-template'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: production
+    # Required reviewers/environment protection need native owner readback before use.
+    env:
+      PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+      FRONTEND_HOST: ${{ vars.FRONTEND_HOST }}
+      WORKOS_CLIENT_ID: ${{ vars.WORKOS_CLIENT_ID }}
+      WORKOS_ISSUER: ${{ vars.WORKOS_ISSUER }}
+      WORKOS_JWKS_URL: ${{ vars.WORKOS_JWKS_URL }}
+      WORKOS_API_HOSTNAME: ${{ vars.WORKOS_API_HOSTNAME }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,11 +47,7 @@ jobs:
         run: uv run bash scripts/prestart.sh
         working-directory: backend
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          PROJECT_NAME: ${{ vars.PROJECT_NAME }}
-          SECRET_KEY: ${{ secrets.SECRET_KEY }}
-          FIRST_SUPERUSER: ${{ vars.FIRST_SUPERUSER }}
-          FIRST_SUPERUSER_PASSWORD: ${{ secrets.FIRST_SUPERUSER_PASSWORD }}
+          API_MIGRATION_DATABASE_URL: ${{ secrets.API_MIGRATION_DATABASE_URL }}
       - name: Deploy to FastAPI Cloud
         run: uv run fastapi deploy
         env:
