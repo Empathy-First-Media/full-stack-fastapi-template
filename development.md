@@ -78,6 +78,23 @@ Stop a locally running FastAPI server before starting the Compose backend becaus
 
 **Note**: The first time you start the stack, it might take a minute for all the services to be ready. To monitor it, use `docker compose logs`, or `docker compose logs backend` for the backend service.
 
+### Browser fixtures in Compose
+
+Set `FRONTEND_HOST` to the built backend's loopback origin before running:
+
+```bash
+docker compose run --rm playwright bunx playwright test
+```
+
+The Playwright container shares the backend's native network namespace and
+waits for its liveness check. The browser origin comes from `FRONTEND_HOST`.
+Plain HTTP service hostnames are not browser secure contexts: AuthKit's PKCE
+flow requires Web Crypto, so use trusted loopback locally and HTTPS in
+production. Do not disable browser security to make an insecure origin pass.
+Browser fixtures do not establish live provider or SQL authorization.
+Inspect generated HTML reports with the native Playwright CLI on the host;
+the shared-network test container does not publish a separate report port.
+
 ## Mailpit
 
 [Mailpit](https://mailpit.axllent.org) captures emails sent during local development instead of delivering them. The local backend connects to it at `localhost:1025`, and the Compose backend connects to the `mailpit` service. Captured emails are available at <http://localhost:8025>.
@@ -110,7 +127,7 @@ Do not store deployment secrets in `.env`. Configure them as described in the [F
 
 ## Pre-commit Hooks and Code Linting
 
-The project uses [prek](https://prek.j178.dev/), a modern alternative to [pre-commit](https://pre-commit.com/), for code linting and formatting.
+The project uses [prek](https://prek.j178.dev/) for native check-only commit hooks.
 
 You can find a file `.pre-commit-config.yaml` with configurations at the root of the project.
 
@@ -132,7 +149,7 @@ Now whenever you try to commit, for example with:
 git commit
 ```
 
-`prek` will check and format the code you are about to commit. If it modifies any files, add those files to Git again before committing.
+`prek` checks the intended changes without rewriting them. Select manual formatting or SDK-generation hooks deliberately; they are not automatic commit checks.
 
 ### Run `prek` Manually
 

@@ -73,18 +73,20 @@ services:
       args:
         - NODE_ENV=production
     ipc: host
+    # Native service networking makes the backend's loopback a browser secure
+    # context for AuthKit PKCE, without relaxing Chromium security.
+    # provenance: https://github.com/compose-spec/compose-spec/blob/3a4a6995e4a971f6173dff9130cb3e38e6738651/05-services.md
+    network_mode: service:backend
     depends_on:
-      - backend
-      - mailpit
+      backend:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
-      - PLAYWRIGHT_BASE_URL=http://backend:8000
-      - VITE_API_URL=http://backend:8000
-      - MAILPIT_HOST=http://mailpit:8025
+      - PLAYWRIGHT_BASE_URL=${FRONTEND_HOST:?Explicit browser origin is required}
       # For the reports when run locally
       - PLAYWRIGHT_HTML_HOST=0.0.0.0
       - CI=${CI:-}
     volumes:
       - ./frontend/blob-report:/app/frontend/blob-report
       - ./frontend/test-results:/app/frontend/test-results
-    ports:
-      - 9323:9323

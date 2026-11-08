@@ -48,7 +48,7 @@ jobs:
     env:
       # Browser network fixtures are not backend JWT/RLS or live WorkOS proof.
       PROJECT_NAME: API browser fixture
-      FRONTEND_HOST: http://backend:8000
+      FRONTEND_HOST: http://localhost:8000
       FASTAPI_ENV: development
       WORKOS_CLIENT_ID: client_fixture
       WORKOS_ISSUER: https://auth.fixture.test/
