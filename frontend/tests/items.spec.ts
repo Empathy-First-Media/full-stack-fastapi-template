@@ -140,3 +140,46 @@ test("organization switch joining an in-flight refresh cannot silently remain in
   )
   await expect(page.getByText("org_fixture_b", { exact: true })).toHaveCount(0)
 })
+
+for (const grant of ["read", "write", "none"]) {
+  test(`project ${grant} grant controls readable items and mutation UI (network fixture)`, async ({
+    page,
+  }) => {
+    await installAuthKitFixture(page, {
+      permissions: grant === "none" ? [] : [`org:projects:${grant}`],
+    })
+    let itemLists = 0
+    await page.route("**/api/v1/items/**", (route) => {
+      itemLists++
+      return route.fulfill({
+        json: {
+          data: [
+            {
+              id: "00000000-0000-4000-8000-000000000006",
+              title: "Readable project item",
+              description: "Permission boundary fixture",
+              owner_id: "00000000-0000-4000-8000-000000000001",
+              tenant_id: "00000000-0000-4000-8000-000000000002",
+              created_at: "2026-01-01T00:00:00Z",
+            },
+          ],
+          count: 1,
+        },
+      })
+    })
+    await page.goto("/items")
+    if (grant === "none") {
+      await expect(page.getByRole("alert")).toContainText(
+        "Project read access required",
+      )
+      expect(itemLists).toBe(0)
+    } else {
+      await expect(
+        page.getByRole("cell", { name: "Readable project item", exact: true }),
+      ).toBeVisible()
+    }
+    await expect(page.getByRole("button", { name: "Add Item" })).toHaveCount(
+      grant === "write" ? 1 : 0,
+    )
+  })
+}

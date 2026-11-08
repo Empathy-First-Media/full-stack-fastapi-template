@@ -8,6 +8,7 @@ export async function installAuthKitFixture(
     organization = "org_fixture_a",
     denied = false,
     tokenLifetimeSeconds = 3600,
+    permissions = ["org:projects:read", "org:projects:write"],
   } = {},
 ) {
   const origin = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173"
@@ -40,7 +41,7 @@ export async function installAuthKitFixture(
         role: "authenticated",
         iat: issuedAt,
         exp: issuedAt + tokenLifetimeSeconds,
-        permissions: [],
+        permissions,
       }
       const token = `${Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")}.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.fixture`
       await route.fulfill({
@@ -74,7 +75,7 @@ export async function installAuthKitFixture(
             identity_entity_id: "00000000-0000-4000-8000-000000000003",
             created_at: "2026-01-01T00:00:00Z",
             user_role: admin ? "admin" : "member",
-            permissions: ["org:projects:read", "org:projects:write"],
+            permissions,
             is_tenant_admin: admin,
           },
         }),

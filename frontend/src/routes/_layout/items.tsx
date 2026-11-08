@@ -58,7 +58,10 @@ function ItemsTable() {
 
 function Items() {
   const { user } = useAuth()
-  if (!user?.permissions.includes("org:projects:read"))
+  if (
+    !user?.permissions.includes("org:projects:read") &&
+    !user?.permissions.includes("org:projects:write")
+  )
     return <p role="alert">Project read access required.</p>
   return (
     <div className="flex flex-col gap-6">

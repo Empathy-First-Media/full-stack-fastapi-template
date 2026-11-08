@@ -27,7 +27,6 @@ jobs:
       WORKOS_JWKS_URL: ${{ vars.WORKOS_JWKS_URL }}
       WORKOS_API_HOSTNAME: ${{ vars.WORKOS_API_HOSTNAME }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      API_MIGRATION_DATABASE_URL: ${{ secrets.API_MIGRATION_DATABASE_URL }}
       SMTP_HOST: ${{ vars.SMTP_HOST }}
       SMTP_USER: ${{ vars.SMTP_USER }}
       SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
@@ -41,6 +40,8 @@ jobs:
       - name: Build
         run: docker compose -f compose.yml -f compose.deploy.yml build
       - name: Prepare database
+        env:
+          API_MIGRATION_DATABASE_URL: ${{ secrets.API_MIGRATION_DATABASE_URL }}
         run: docker compose -f compose.yml -f compose.deploy.yml run --rm migrate
       - name: Start application
         run: docker compose -f compose.yml -f compose.deploy.yml up -d

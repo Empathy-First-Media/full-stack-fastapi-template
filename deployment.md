@@ -43,7 +43,7 @@ Supply `API_MIGRATION_DATABASE_URL` only to the reviewed migration job. It must
 use an authority distinct from the runtime login. From `backend/`:
 
 ```console
-uv run alembic -c alembic-api.ini upgrade api@head
+uv run --no-active --locked --no-sync alembic -c alembic-api.ini upgrade api@head
 ```
 
 `scripts/prestart.sh` invokes this exact branch and no seed. Without a reviewed

@@ -51,7 +51,11 @@ function UsersTable() {
 
 function Admin() {
   const { user } = useAuth()
-  if (!user?.is_tenant_admin || !user.permissions.includes("org:projects:read"))
+  if (
+    !user?.is_tenant_admin ||
+    (!user.permissions.includes("org:projects:read") &&
+      !user.permissions.includes("org:projects:write"))
+  )
     return <p role="alert">Tenant administrator access required.</p>
   return (
     <div className="flex flex-col gap-6">

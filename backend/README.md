@@ -43,8 +43,10 @@ deny access. Email equality is never an identity link or provisioning rule.
 Local `User.id` remains a UUID; tenant IDs retain the canonical owner's TEXT type.
 
 Every business action requires `org:projects:read`/`org:projects:write` as
-appropriate. Administrators are selected-tenant administrators, not global
-operators. Ordinary users access their own items; tenant administrators can
+appropriate. Write permission also grants read access in both the API and UI;
+read permission alone never grants mutation access. Administrators are
+selected-tenant administrators, not global operators. Ordinary users access
+their own items; tenant administrators can
 access items in their selected tenant only. Account administration also requires
 explicit action permission. Profile changes cannot mutate tenant/identity/role;
 item changes cannot mutate tenant/owner attribution.
