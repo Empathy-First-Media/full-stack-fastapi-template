@@ -34,6 +34,17 @@ login, refresh, logout and organization selection; it uses public
 
 ## Prepare the API namespace
 
+Prepare the declared application environment before supplying migration
+credentials. From the application root:
+
+```console
+uv sync --no-active --locked
+```
+
+An embedding workspace must select its API-owned `UV_PROJECT_ENVIRONMENT`,
+not the parent's environment. `--no-sync` below assumes this provisioning has
+succeeded; it does not install dependencies or check environment freshness.
+
 Provision canonical product schemas/identities through their existing owner and
 `api` through the reviewed schema owner. Preserve canonical tenant TEXT IDs and
 local actor UUIDs. Do not run the legacy public migration history, create tables

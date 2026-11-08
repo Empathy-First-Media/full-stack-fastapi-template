@@ -82,7 +82,7 @@ a previous request's role or claims.
 From this upstream repository's root:
 
 ```console
-uv sync --locked --package app
+uv sync --no-active --locked
 uv run --package app --directory backend fastapi dev
 ```
 
