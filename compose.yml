@@ -2,8 +2,8 @@ services:
   proxy:
     image: traefik:v3.7
     volumes:
-      # Add Docker as a mounted volume, so that Traefik can read the labels of other services
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Host socket path comes from the current Docker context. The container target is Traefik's default endpoint.
+      - ${DOCKER_SOCKET:?Set DOCKER_SOCKET to the current Docker context socket path}:/var/run/docker.sock:ro
     command:
       # Enable Docker in Traefik, so that it reads labels from Docker services
       - --providers.docker

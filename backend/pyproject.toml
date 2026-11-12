@@ -4,31 +4,31 @@ version = "0.1.0"
 description = ""
 requires-python = ">=3.14,<4.0"
 dependencies = [
-    "fastapi[standard]>=0.141.1,<1.0.0",
-    "python-multipart<1.0.0,>=0.0.27",
-    "email-validator<3.0.0.0,>=2.1.0.post1",
-    "pydantic>=2.13.5",
-    "emails>=1.1.2,<2.0",
-    "jinja2<4.0.0,>=3.1.4",
-    "alembic>=1.19.1,<2.0.0",
-    "httpx<1.0.0,>=0.25.1",
-    "psycopg[binary]>=3.3.6,<4.0.0",
-    "sqlmodel>=0.0.46,<1.0.0",
-    "pydantic-settings<3.0.0,>=2.2.1",
-    "sentry-sdk[fastapi]>=2.70.0,<3.0.0",
-    "pyjwt[crypto]>=2.15.0,<3.0.0",
-    "alembic-utils>=0.8.8",
-    "pglast>=8.7",
+  "fastapi[standard]>=0.141.1,<1.0.0",
+  "python-multipart<1.0.0,>=0.0.27",
+  "email-validator<3.0.0.0,>=2.1.0.post1",
+  "pydantic>=2.13.5",
+  "emails>=1.1.2,<2.0",
+  "jinja2<4.0.0,>=3.1.4",
+  "alembic>=1.19.1,<2.0.0",
+  "httpx<1.0.0,>=0.25.1",
+  "psycopg[binary]>=3.3.6,<4.0.0",
+  "sqlmodel>=0.0.46,<1.0.0",
+  "pydantic-settings<3.0.0,>=2.2.1",
+  "sentry-sdk[fastapi]>=2.70.0,<3.0.0",
+  "pyjwt[crypto]>=2.15.0,<3.0.0",
+  "alembic-utils>=0.8.8",
+  "pglast>=8.7",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest<10.0.0,>=7.4.3",
-    "mypy<3.0.0,>=1.8.0",
-    "ty>=0.0.25",
-    "ruff<1.0.0,>=0.16.0",
-    "coverage<8.0.0,>=7.4.3",
-    "httpx2>=2.0.0",
+  "pytest<10.0.0,>=7.4.3",
+  "mypy<3.0.0,>=1.8.0",
+  "ty>=0.0.25",
+  "ruff<1.0.0,>=0.16.0",
+  "coverage<8.0.0,>=7.4.3",
+  "httpx2>=2.0.0",
 ]
 
 [build-system]
@@ -46,21 +46,21 @@ exclude = ["alembic"]
 
 [tool.ruff.lint]
 select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "UP",  # pyupgrade
-    "ARG001", # unused arguments in functions
-    "T201",   # print statements are not allowed
+  "E",      # pycodestyle errors
+  "W",      # pycodestyle warnings
+  "F",      # pyflakes
+  "I",      # isort
+  "B",      # flake8-bugbear
+  "C4",     # flake8-comprehensions
+  "UP",     # pyupgrade
+  "ARG001", # unused arguments in functions
+  "T201",   # print statements are not allowed
 ]
 ignore = [
-    "E501",  # line too long, handled by black
-    "B008",  # do not perform function calls in argument defaults
-    "W191",  # indentation contains tabs
-    "B904",  # Allow raising exceptions without from e, for HTTPException
+  "E501", # line too long, handled by black
+  "B008", # do not perform function calls in argument defaults
+  "W191", # indentation contains tabs
+  "B904", # Allow raising exceptions without from e, for HTTPException
 ]
 
 [tool.ruff.lint.pyupgrade]
