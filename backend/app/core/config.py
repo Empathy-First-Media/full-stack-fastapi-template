@@ -13,8 +13,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # hide_input_in_errors is required here, not cosmetic. A missing or malformed binding makes
+    # pydantic render the input mapping it collected, and the mapping this class collects carries
+    # SMTP_PASSWORD in clear and the DATABASE_URL with its password in it -- the same binding every
+    # other settings model in the estate already carries (catalog GraphSettings, CatalogSettings,
+    # RedisPlaneSettings, mcp-fleet-search Settings).
     model_config = SettingsConfigDict(
-        env_file="../.env", env_ignore_empty=True, extra="ignore"
+        env_file="../.env",
+        env_ignore_empty=True,
+        extra="ignore",
+        hide_input_in_errors=True,
     )
 
     API_V1_STR: str = "/api/v1"
